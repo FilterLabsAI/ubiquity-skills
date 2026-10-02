@@ -1,0 +1,107 @@
+---
+name: ubiquity-onboarding
+description: New-user overview of the full Ubiquity workflow + diagrams.
+---
+
+# Ubiquity: new-user onboarding overview
+
+This is the map of the whole product for a brand-new user -- what order
+things happen in, which skill covers each step, and how a user goes from
+a plain-language data question to a running, analyzable feed. Every step
+below links to the skill that has the full confirmed mechanics; this
+skill is the index + narrative, not a replacement for them.
+
+Linked files: `references/openapi.json` (OpenAPI 3.0 spec for every
+endpoint exercised across the `ubiquity-*` skill family) and
+`references/flowcharts.md` (Mermaid diagrams of the end-to-end workflow).
+
+## The 8-step workflow
+
+1. **Ask a data question in plain language.** e.g. "News and social media
+   about renewable energy policy in Germany." No account setup beyond
+   login is needed first -- see `ubiquity-auth`.
+2. **Build a pipeline via the Discover chat.** Ubi ("the discovery bot")
+   parses your sentence into LOCATION / TOPIC / entity-type chips, shows
+   you what it found, and asks "Would you like to discover sources for
+   this query?" Confirming creates the pipeline + its feed. See
+   `ubiquity-pipeline-creation` -- including the important "verify the
+   resolved location" check for multi-country/supranational queries
+   (EU/UN/NATO geocode wrong by default).
+3. **Tune Agent Settings** (optional but recommended) before or
+   immediately after the first discovery job -- these bias HOW the
+   discovery/evaluation agents search and filter sources (query volume,
+   creativity, language preference, credibility/quality thresholds,
+   custom instructions). Settings only apply going FORWARD, never
+   retroactively. See `ubiquity-agent-settings` for a full
+   recommendation strategy by use case (news monitoring, social/sentiment,
+   government/policy, economic data).
+4. **Run the discovery job and review entities.** Discovery is a slow
+   agentic job (15-20+ min, sometimes longer); it searches, evaluates,
+   and proposes candidate sources. Once sources appear, review them:
+   like/dislike/flag/remove, read the AI's own written evaluation notes
+   per source, and optionally run the automated suggestion pass. Your
+   votes feed directly into the NEXT discovery job's prompt as positive/
+   negative examples. See `ubiquity-entity-review` and
+   `ubiquity-discovery-jobs` (including the "never stack discovery jobs"
+   rule and the two-save-paths distinction).
+5. **Scale up discovery as needed.** "Increase Coverage" (Low/Medium/
+   High/X-High) launches a bigger follow-up job once you're happy with
+   the direction entities are heading, incorporating your votes. One
+   pipeline runs one discovery job at a time. See `ubiquity-discovery-jobs`.
+6. **Enable the Understand layer and set a refresh interval.** This is
+   where raw discovered sources start actually being scanned/ingested
+   into analyzable "artifacts" (articles/posts/content). Set how often
+   the feed re-syncs (Do Not Update / 12h / Daily / Weekly / etc -- a
+   single auto-saving dropdown). See `ubiquity-understand-layer`.
+7. **Add metrics.** Create custom scored metrics (Sentiment, Stance
+   toward an entity, free-text Entity extraction, or a fully custom
+   prompt) that run against every ingested artifact, producing a time
+   series you can chart and query. See `ubiquity-metric-generators`.
+8. **Analyze the data -- three ways, pick based on the question:**
+   - **Ubi chat** (`ubiquity-ubi-chat`) -- ask natural-language questions
+     about the feed; grounded answers with real citations, can reference
+     your custom metrics by name, can render charts on request.
+   - **Data Browser** (chart + artifact table on the Understand tab,
+     documented in `ubiquity-understand-layer`) -- visual/UI exploration:
+     a metric-over-time chart (or a raw "Sample Distribution" document
+     count) plus a paginated, filterable table of individual artifacts.
+   - **Direct API access** (`ubiquity-data-feed-api`) -- when Hermes
+     itself needs to directly reason over/summarize/analyze feed content
+     (not just render a UI view), pull the raw corpus via the
+     `/feeds/{id}/stream` endpoint -- full, untruncated content, no
+     1000-item display cap, filterable by date/text/entity.
+
+   Optional: **Pipeline Routing** (`ubiquity-pipeline-routing`) connects
+   multiple pipelines' feeds together (useful when a question spans more
+   locations/topics than one pipeline should carry) and **Data Egress**
+   pushes a feed's content to a third party (Meltwater integration seen
+   so far).
+
+## Skill map (which skill, which step)
+
+| Step | Skill |
+|---|---|
+| Login / tokens | `ubiquity-auth` |
+| Parse a question -> create a pipeline | `ubiquity-pipeline-creation` |
+| Choose/tune Agent Settings | `ubiquity-agent-settings` |
+| Review discovered sources, vote | `ubiquity-entity-review` |
+| Launch/scale/cancel discovery jobs | `ubiquity-discovery-jobs` |
+| Enable Understand layer, refresh interval, data browser | `ubiquity-understand-layer` |
+| Create custom metrics | `ubiquity-metric-generators` |
+| Chat with Ubi about the feed | `ubiquity-ubi-chat` |
+| Direct raw-data API access for Hermes-side reasoning | `ubiquity-data-feed-api` |
+| Connect pipelines together / egress | `ubiquity-pipeline-routing` |
+
+## Key cross-cutting rules (apply at every step)
+- Never launch a new discovery job as a side effect of an unrelated save
+  (saving Agent Settings, adding a chat-driven location/topic refinement)
+  -- those are pure state saves; only an explicit "Yes, Discover Sources"
+  / coverage-level button actually launches a job (`ubiquity-discovery-jobs`).
+- `feed_id` (artifacts, metrics, chat, refresh interval, votes-list-by-
+  pipeline aside) vs `pipeline_id` (agent settings, routes, discovery
+  jobs) are different ids on the same object -- keep both once you have
+  them (`GET /api/locations/v1/pipelines/{id}` returns both).
+- Changes to Agent Settings and metric generators apply going forward
+  only -- never retroactively re-score/re-search past data.
+- Everything requires a valid Bearer token refreshed via `ubiquity-auth`;
+  tokens expire ~30 min, re-bootstrap browser sessions as needed.

@@ -1,0 +1,332 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
+    "version": "1.0.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section)."
+  },
+  "servers": [
+    {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
+    {"url": "https://auth.filterlabs.ai", "description": "Keycloak auth server (realm filter-labs-web, client web-app)"}
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {"type": "http", "scheme": "bearer", "bearerFormat": "JWT"}
+    }
+  },
+  "security": [{"bearerAuth": []}],
+  "paths": {
+    "/realms/filter-labs-web/protocol/openid-connect/token": {
+      "post": {
+        "summary": "Login / token refresh (Keycloak ROPC + refresh_token grants)",
+        "security": [],
+        "requestBody": {
+          "content": {"application/x-www-form-urlencoded": {"schema": {"type": "object", "properties": {
+            "grant_type": {"type": "string", "enum": ["password", "refresh_token"]},
+            "client_id": {"type": "string", "example": "web-app"},
+            "username": {"type": "string"}, "password": {"type": "string"},
+            "refresh_token": {"type": "string"}
+          }}}}
+        },
+        "responses": {"200": {"description": "access_token (~30min TTL) + refresh_token (~8hr TTL, rotates)"}}
+      }
+    },
+    "/orchestrator/search/unified": {
+      "post": {
+        "summary": "Parse a free-text query into LOCATION/TOPIC/entity-type entities",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"query": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "entities[], location_uuid, location{id,name,country,coordinates,bounding_box,is_multi_location,component_locations}"}}
+      }
+    },
+    "/locations/v1/pipelines": {
+      "get": {
+        "summary": "List pipelines",
+        "parameters": [
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer"}},
+          {"name": "order_by", "in": "query", "schema": {"type": "string", "example": "created_at"}},
+          {"name": "order", "in": "query", "schema": {"type": "string", "enum": ["ASC", "DESC"]}},
+          {"name": "saved_search_id", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "array of pipeline objects"}}
+      },
+      "post": {
+        "summary": "Create a pipeline (fires after 'Yes, Discover Sources')",
+        "responses": {"200": {"description": "pipeline object: id, feed_id, session_id, metadata.discovery_config, metadata.agent_config, search_filters"}}
+      }
+    },
+    "/locations/v1/pipelines/{pipeline_id}": {
+      "get": {"summary": "Get a pipeline (feed_id, agent_config, discovery_config, search_filters)", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "pipeline object"}}},
+      "put": {"summary": "Full update, e.g. rename", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated pipeline"}}},
+      "patch": {
+        "summary": "Update metadata.agent_config / discovery_config (Agent Settings save) -- whole metadata object must be re-sent, not a partial diff",
+        "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "metadata": {"type": "object", "properties": {
+            "agent_config": {"type": "object", "properties": {
+              "search_generation": {"type": "object", "properties": {
+                "max_queries": {"type": "integer", "minimum": 5, "maximum": 50},
+                "creativity_level": {"type": "string", "enum": ["low", "medium", "high"]},
+                "focus_types": {"type": "array", "items": {"type": "string", "enum": ["news", "government", "blog", "community", "social"]}},
+                "language_preference": {"type": "string", "enum": ["native_first", "mixed", "english_first"]}
+              }},
+              "evaluation": {"type": "object", "properties": {
+                "credibility_threshold": {"type": "number", "minimum": 0, "maximum": 1},
+                "local_focus_priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                "quality_standards": {"type": "string", "enum": ["lenient", "moderate", "strict"]},
+                "topic_relevance_weight": {"type": "number", "minimum": 0, "maximum": 1}
+              }},
+              "datasets_discovery": {"type": "object", "properties": {
+                "enable_dataset_hunting": {"type": "boolean"},
+                "providers": {"type": "array", "items": {"type": "string", "example": "fred"}}
+              }}
+            }},
+            "discovery_config": {"type": "object", "properties": {
+              "max_queries": {"type": "integer"}, "max_sources": {"type": "integer"}, "min_sources": {"type": "integer"}
+            }}
+          }}
+        }}}}},
+        "responses": {"200": {"description": "full updated pipeline object"}}
+      }
+    },
+    "/locations/v1/pipelines/{pipeline_id}/routes": {
+      "get": {"summary": "List pipeline routes (fan-in/fan-out)", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "array, each with source/destination_pipeline_name + feed_id denormalized"}}},
+      "post": {
+        "summary": "Create a route from this (source) pipeline to a destination pipeline",
+        "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"destination_pipeline_id": {"type": "string"}}}}}},
+        "responses": {"201": {"description": "route object: id, source_pipeline_id, destination_pipeline_id, enabled, filter_mode, filter_config"}}
+      }
+    },
+    "/locations/v1/pipelines/{pipeline_id}/routes/{route_id}": {
+      "delete": {"summary": "Delete a route", "parameters": [
+        {"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "route_id", "in": "path", "required": true, "schema": {"type": "string"}}
+      ], "responses": {"204": {"description": "empty"}}}
+    },
+    "/locations/v1/entity-votes/toggle": {
+      "post": {
+        "summary": "Like / dislike / flag an entity (true toggle -- repeating the same vote_type un-votes it)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "entity_id": {"type": "integer"},
+          "pipeline_id": {"type": "string"},
+          "keycloak_user_id": {"type": "string", "description": "Keycloak user UUID (JWT 'sub' claim), NOT the email"},
+          "vote_type": {"type": "string", "enum": ["like", "dislike", "flag"]}
+        }}}}},
+        "responses": {"200": {"description": "{action: created|removed, vote: {...}}"}, "201": {"description": "{action: created, vote: {...}}"}}
+      }
+    },
+    "/locations/v1/entity-votes/pipeline/{pipeline_id}": {
+      "get": {"summary": "List current votes for a pipeline", "parameters": [
+        {"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "limit", "in": "query", "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "array of vote objects, [] if none"}}}
+    },
+    "/locations/api/v1/feeds/{feed_id}/entities": {
+      "get": {
+        "summary": "List discovered entities (sources/datasets) for a feed",
+        "parameters": [
+          {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer"}},
+          {"name": "q", "in": "query", "schema": {"type": "string"}},
+          {"name": "order_by", "in": "query", "schema": {"type": "string", "enum": ["vote", "name", "type", "created_at"]}},
+          {"name": "order", "in": "query", "schema": {"type": "string", "enum": ["asc", "desc"]}},
+          {"name": "type", "in": "query", "schema": {"type": "string", "example": "all"}}
+        ],
+        "responses": {"200": {"description": "{entities[], total, dataset_count, source_count}"}}
+      }
+    },
+    "/locations/api/v1/feeds/{feed_id}/entities/{entity_id}": {
+      "delete": {"summary": "Remove an entity from a feed (hard delete)", "parameters": [
+        {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "entity_id", "in": "path", "required": true, "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "{message: 'Entity removed from feed successfully'}"}}}
+    },
+    "/locations/api/v1/source-evaluation-logs/by-url": {
+      "get": {
+        "summary": "Full free-text AI evaluation reasoning for a discovered source, keyed by its URL",
+        "parameters": [{"name": "url", "in": "query", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "{id, credibility_score, local_focus, quality, evaluation_details:{type,title,evaluation_notes,...}}"}}
+      }
+    },
+    "/orchestrator/api/v1/jobs/create": {
+      "post": {
+        "summary": "Launch a discovery/curation job (ONLY call that actually starts agentic work -- see ubiquity-discovery-jobs for the never-stack-jobs rule)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "location_uuid": {"type": "string"},
+          "job_type": {"type": "string", "example": "discovery"},
+          "parameters": {"type": "object", "properties": {
+            "search_query": {"type": "string"},
+            "parsed_entities": {"type": "array", "items": {"type": "object"}},
+            "feed_id": {"type": "integer"},
+            "pipeline_id": {"type": "string"},
+            "vote_context": {"type": "object", "properties": {
+              "liked_entities": {"type": "array", "items": {"type": "object", "properties": {"name": {"type": "string"}, "type": {"type": "string"}}}},
+              "disliked_entities": {"type": "array", "items": {"type": "object"}}
+            }}
+          }},
+          "max_queries": {"type": "integer"}, "max_sources": {"type": "integer"}, "min_sources": {"type": "integer"}
+        }}}}},
+        "responses": {"200": {"description": "job object: id, status=pending, progress=0"}}
+      }
+    },
+    "/locations/api/v1/jobs/{job_id}": {
+      "get": {"summary": "Poll a job's status/progress", "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{id, status: pending|running|completed|failed|cancelled, progress (0-100), job_type, result_data, pipeline_id}"}}}
+    },
+    "/locations/api/v1/jobs/{job_id}/status": {
+      "put": {
+        "summary": "Cancel a job (only status=cancelled exercised)",
+        "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"status": {"type": "string", "example": "cancelled"}}}}}},
+        "responses": {"200": {"description": "job echoed with status=cancelled, completed_at set"}}
+      }
+    },
+    "/locations/api/v1/jobs": {
+      "get": {"summary": "List jobs across the account", "parameters": [
+        {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+        {"name": "offset", "in": "query", "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "array of job objects"}}}
+    },
+    "/locations/api/v1/jobs/count": {
+      "get": {"summary": "Total job count", "responses": {"200": {"description": "{count}"}}}
+    },
+    "/locations/api/v1/jobs/count/status/{status}": {
+      "get": {"summary": "Job count by status", "parameters": [{"name": "status", "in": "path", "required": true, "schema": {"type": "string", "enum": ["pending", "running", "completed", "failed", "cancelled"]}}], "responses": {"200": {"description": "{count}"}}}
+    },
+    "/orchestrator/jobs/{job_id}/async-status": {
+      "get": {"summary": "Async sub-task progress for a job", "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{job_id, pending_count, processed_count, failed_count, total_count, all_complete, has_async_work, snapshots}"}}}
+    },
+    "/locations/api/v1/feeds/{feed_id}": {
+      "get": {"summary": "Get feed (refresh_interval as human string, e.g. '12 hours')", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "feed object"}}},
+      "put": {
+        "summary": "Full update -- used for rename and for Data Refresh Interval (same underlying field as 'Enable Ubi' toggle)",
+        "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "name": {"type": "string", "description": "must be re-sent, this is a full PUT not a partial PATCH"},
+          "refresh_interval_minutes": {"type": "integer", "description": "0=Do Not Update, 720=12h, 1440=Daily, 2880=Every 2 Days, 10080=Weekly, ~43200=Monthly"}
+        }}}}},
+        "responses": {"200": {"description": "feed with refresh_interval{Microseconds,Days,Months,Valid} struct, refreshed_at"}}
+      }
+    },
+    "/locations/api/v1/feeds/{feed_id}/metric_prompts": {
+      "get": {"summary": "List metric generators for a feed (null if none)", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "array or null"}}},
+      "post": {
+        "summary": "Create (and, via the Angular edit form, functionally also edit) a metric generator",
+        "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "feed_id": {"type": "integer"}, "name": {"type": "string"}, "metric_name": {"type": "string", "description": "client-generated slug of name"},
+          "prompt": {"type": "string"}, "active": {"type": "boolean"}
+        }}}}},
+        "responses": {"200": {"description": "metric prompt object: id, feed_id, name, metric_name, prompt, filter_prompt, filter_distance, active, created_at, updated_at"}}
+      }
+    },
+    "/understand/chat/sessions": {
+      "get": {
+        "summary": "List Ubi chat sessions for a user+feed",
+        "parameters": [
+          {"name": "keycloak_user_id", "in": "query", "required": true, "schema": {"type": "string"}, "description": "the account EMAIL here, not the Keycloak UUID -- opposite convention from entity-votes/toggle"},
+          {"name": "feed_id", "in": "query", "required": true, "schema": {"type": "integer"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer"}}
+        ],
+        "responses": {"200": {"description": "[] or array of session objects with filter_state auto-derived from the first message"}}
+      },
+      "post": {
+        "summary": "Create a chat session (fires lazily on first message, not on 'New Chat' click)",
+        "responses": {"200": {"description": "session object: id, feed_id, title, filter_state{topics,entities,dateRange,siteTypes,metricName,textSearch,entityTypes}"}}
+      }
+    },
+    "/understand/chat/sessions/{session_id}": {
+      "get": {"summary": "Get one session's metadata", "parameters": [
+        {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}},
+        {"name": "keycloak_user_id", "in": "query", "required": true, "schema": {"type": "string"}}
+      ], "responses": {"200": {"description": "session object"}}}
+    },
+    "/understand/chat/sessions/{session_id}/messages": {
+      "get": {
+        "summary": "Read message history for a session",
+        "parameters": [
+          {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "keycloak_user_id", "in": "query", "required": true, "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer"}}
+        ],
+        "responses": {"200": {"description": "array: {id, session_id, role, content, citations[{id,url,score,title}], chart{type,title,config}, created_at}"}}
+      },
+      "post": {
+        "summary": "Send a message, get Ubi's reply (also implicitly creates the session on the first call)",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"content": {"type": "string"}}}}}},
+        "responses": {"200": {"description": "assistant message object; response latency ~15-25s plain, ~40s+ for chart requests"}}
+      }
+    },
+    "/understand/artifacts/count/{feed_id}": {
+      "get": {"summary": "Count ingested artifacts for a feed", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "{count, feed_id}"}}}
+    },
+    "/understand/artifacts/preview": {
+      "post": {
+        "summary": "Fetch artifacts for the Data Browser table + default 'Sample Distribution' chart. limit is accepted but NOT honored server-side -- always returns up to a fixed 1000-item cap.",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "feed_id": {"type": "integer"},
+          "filter_state": {"type": "object", "properties": {
+            "dateRange": {"type": "object", "properties": {"start": {"type": "string", "format": "date"}, "end": {"type": "string", "format": "date"}}},
+            "topics": {"type": "array", "nullable": true}, "entities": {"type": "array", "nullable": true},
+            "siteTypes": {"type": "array", "items": {"type": "string"}}, "metricName": {"type": "string", "nullable": true},
+            "textSearch": {"type": "string", "nullable": true}, "entityTypes": {"type": "array", "nullable": true}
+          }},
+          "limit": {"type": "integer", "description": "accepted but ignored -- see summary"}
+        }}}}},
+        "responses": {
+          "200": {"description": "{artifacts: [{id, headline, url, site_type, published_at, content_sample, score}]}"},
+          "500": {"description": "'Collection <email> doesn't exist' -- normal/expected before any artifacts have been ingested yet, not a real error"}
+        }
+      }
+    },
+    "/understand/metrics/preview": {
+      "post": {
+        "summary": "Fetch a custom metric's time series + per-artifact scores for the Data Browser chart. No result cap (unlike artifacts/preview) -- pulls the maximum matching data, hence slow; always scope with filter_state.dateRange. Fire-and-forget pattern required when calling from browser automation (response can take ~45s-150s+).",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "feed_id": {"type": "integer"},
+          "filter_state": {"type": "object", "properties": {
+            "metricName": {"type": "string"},
+            "dateRange": {"type": "object", "properties": {"start": {"type": "string", "format": "date"}, "end": {"type": "string", "format": "date"}}}
+          }}
+        }}}}},
+        "responses": {"200": {"description": "{data: [{artifact_uuid, score, list}], series: [{bucket, score}], total_count, filter_applied}"}}
+      }
+    },
+    "/locations/api/v1/feeds/{feed_id}/stream": {
+      "get": {
+        "summary": "Direct Data Feed (Curator Locations) API -- raw content items, full corpus (no 1000-item display cap), for Hermes-side direct reasoning/analysis over feed content. See ubiquity-data-feed-api.",
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}, "description": "feed_id (path param name is 'id')"},
+          {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000}},
+          {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0, "maximum": 10000}},
+          {"name": "cursor", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "UNCONFIRMED advancement behavior -- see skill pitfalls"},
+          {"name": "order_by", "in": "query", "schema": {"type": "string", "enum": ["published_at", "scraped_at"], "default": "published_at"}},
+          {"name": "content_max_length", "in": "query", "schema": {"type": "integer", "default": 500, "minimum": 0, "maximum": 10000}},
+          {"name": "include_vectors", "in": "query", "schema": {"type": "string", "description": "comma-separated: search, cluster"}},
+          {"name": "date_from", "in": "query", "schema": {"type": "string"}},
+          {"name": "date_to", "in": "query", "schema": {"type": "string"}},
+          {"name": "text_search", "in": "query", "schema": {"type": "string"}},
+          {"name": "entity_ids", "in": "query", "schema": {"type": "string"}},
+          {"name": "entity_types", "in": "query", "schema": {"type": "string", "description": "comma-separated: institution, individual"}},
+          {"name": "urls", "in": "query", "schema": {"type": "string"}}
+        ],
+        "responses": {"200": {"description": "{items: [{uuid,headline,content,url,published_at,scraped_at,entity_id,entity_type,authors,metrics}], pagination:{limit,total,has_more,next_cursor}}"}}
+      }
+    },
+    "/locations/v1/locations": {
+      "get": {"summary": "Free-text location/POI search (not a curated country/region list)", "parameters": [
+        {"name": "q", "in": "query", "required": true, "schema": {"type": "string"}},
+        {"name": "limit", "in": "query", "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "array of location matches"}}}
+    },
+    "/locations/v1/locations/{location_uuid}": {
+      "get": {"summary": "Get a (possibly synthesized COMBINED-) location object", "parameters": [{"name": "location_uuid", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{id, name, abbreviation, country, coordinates, bounding_box}"}}}
+    },
+    "/locations/api/v1/saved-searches/{saved_search_id}": {
+      "put": {"summary": "Re-save the pipeline's saved search_query/search_filters (fired as part of the coverage-level launch sequence)", "parameters": [{"name": "saved_search_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated saved-search object"}}}
+    }
+  }
+}
