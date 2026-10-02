@@ -87,6 +87,35 @@ POST /api/understand/artifacts/preview
   # filter_state can include a date range, e.g.:
   {"feed_id": <feed_id>, "filter_state": {"dateRange": {"start": "2026-09-01", "end": "2026-10-03"}}, "limit": 1000}
 ```
+**CONFIRMED BUG -- `artifacts/count/<feed_id>` is not reliable, do not use
+it to check ingestion progress.** Observed live: calling it for several
+DIFFERENT feeds on the same account (an established feed with real
+ingested content, and a feed created minutes earlier with zero actual
+content yet) returned the EXACT SAME `count` value (~27,431) for every
+one of them. This is not a per-feed count -- it looks like a stale/cached
+or account-wide value, not something scoped to the `feed_id` in the
+request. A feed can show `count: 27431` here while `artifacts/preview`
+genuinely returns `total_count: 0` and an empty `artifacts` list for that
+same feed -- i.e. the count endpoint will actively lie about a brand-new
+feed having tens of thousands of documents when it has none.
+**Always use `artifacts/preview`'s own `total_count` field (or
+`len(artifacts)`) as the source of truth for "has this feed ingested
+anything yet," never `artifacts/count`.** A quick zero-cost check:
+```
+POST /api/understand/artifacts/preview
+{"feed_id": <feed_id>, "filter_state": {}, "limit": 1000}
+```
+`total_count: 0` (empty `artifacts: []`) means nothing has been indexed
+into the queryable collection yet, regardless of what `artifacts/count`
+claims -- poll this endpoint (every 1-2 minutes is plenty; it's a fast
+call, unlike `metrics/preview`) rather than the count endpoint when
+waiting for a freshly-created or freshly-refreshed feed to finish
+ingesting. This was reproduced consistently, not a one-off glitch -- treat
+`artifacts/count` as currently non-functional for this purpose until
+FilterLabs fixes it server-side, and prefer `artifacts/preview` for any
+other use (progress UI, "is this feed ready for Ubi chat/metrics yet"
+checks) too.
+
 **`artifacts/preview` defaults to capping results at 1000** (the `limit`
 param) -- it does NOT try to return everything matching the filter.
 **CONFIRMED: the `limit` param does NOT actually limit the response --**
