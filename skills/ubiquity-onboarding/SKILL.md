@@ -81,7 +81,11 @@ endpoint exercised across the `ubiquity-*` skill family) and
 8. **Analyze the data -- three ways, pick based on the question:**
    - **Ubi chat** (`ubiquity-ubi-chat`) -- ask natural-language questions
      about the feed; grounded answers with real citations, can reference
-     your custom metrics by name, can render charts on request.
+     your custom metrics by name, can render charts on request. Drive
+     this via the direct `understand/chat/sessions` API (synchronous,
+     reply returned inline) rather than scripting the SPA -- see
+     `ubiquity-ubi-chat` for the confirmed request/response shapes and
+     why the browser path is fragile for this.
    - **Data Browser** (chart + artifact table on the Understand tab,
      documented in `ubiquity-understand-layer`) -- visual/UI exploration:
      a metric-over-time chart (or a raw "Sample Distribution" document

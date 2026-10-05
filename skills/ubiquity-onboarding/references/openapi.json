@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.2.0",
-    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save."
+    "version": "1.3.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save. v1.3.0: corrected the chat-sessions messages POST -- required field is 'message' not 'content', confirmed the call is SYNCHRONOUS (reply returned inline, no polling needed on a fresh send), documented the full confirmed response shape including filter_update, and added the confirmed DELETE .../sessions/{id} cleanup endpoint; this is now the preferred way to drive Ubi chat over browser_exec on the SPA (see ubiquity-ubi-chat)."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
@@ -328,7 +328,10 @@
       "get": {"summary": "Get one session's metadata", "parameters": [
         {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}},
         {"name": "keycloak_user_id", "in": "query", "required": true, "schema": {"type": "string"}}
-      ], "responses": {"200": {"description": "session object"}}}
+      ], "responses": {"200": {"description": "session object"}}},
+      "delete": {"summary": "CONFIRMED live: delete a chat session (e.g. to clean up a throwaway/test session created while probing the API).", "parameters": [
+        {"name": "session_id", "in": "path", "required": true, "schema": {"type": "string"}}
+      ], "responses": {"200": {"description": "{status: 'deleted', session_id}"}}}
     },
     "/understand/chat/sessions/{session_id}/messages": {
       "get": {
@@ -342,9 +345,9 @@
         "responses": {"200": {"description": "array: {id, session_id, role, content, citations[{id,url,score,title}], chart{type,title,config}, created_at}"}}
       },
       "post": {
-        "summary": "Send a message, get Ubi's reply (also implicitly creates the session on the first call). This is a DIFFERENT chat system from /orchestrator/search/unified's refine loop above -- this one is the standing per-feed Understand-tab chat, that one is discovery-time query parsing/refinement.",
-        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"content": {"type": "string"}}}}}},
-        "responses": {"200": {"description": "assistant message object; response latency ~15-25s plain, ~40s+ for chart requests"}}
+        "summary": "PREFERRED way to drive Ubi chat (over browser_exec on the SPA, see ubiquity-ubi-chat) -- send a message, get Ubi's reply. Also implicitly creates the session on the first call if session_id doesn't exist yet. This is a DIFFERENT chat system from /orchestrator/search/unified's refine loop above -- this one is the standing per-feed Understand-tab chat, that one is discovery-time query parsing/refinement. CONFIRMED SYNCHRONOUS: the reply comes back in THIS SAME response, not via a follow-up GET -- no polling needed for a fresh send.",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["message"], "properties": {"message": {"type": "string", "description": "CONFIRMED required field name is 'message', not 'content' -- an empty body 422s with {detail:[{loc:[body,message], msg:'Field required'}]}"}}}}}},
+        "responses": {"200": {"description": "CONFIRMED shape: {user_message: {id,session_id,role,content,created_at}, assistant_message: {id,role,content,reasoning_summary,citations,chart,created_at}, citations[], artifacts_count, chart, filter_update:{dateRange,siteTypes,topics,entities,textSearch,reason}}. Latency: ~3-4s confirmed for a trivial question; a complex/feed-wide question can take several MINUTES (reasoned from user correction, not independently timed) -- set client timeout accordingly, several minutes not just the ~15-25s/40s+ figures observed on the SPA UI path (which may reflect a UI-side timeout cutting the true wait short, not the real backend completion time)."}}
       }
     },
     "/understand/artifacts/count/{feed_id}": {
