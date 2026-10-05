@@ -301,6 +301,15 @@ field is reliably inferred the same way -- notes per field:
   filter (e.g. restricting which metric's chart shows), not a precondition
   for Ubi being able to reason over metric data in chat.
 
+## Default reporting behavior (user preference)
+When relaying a Ubi chat answer back to the user, always show the FULL
+raw `assistant_message.content` verbatim (headers, tables, emoji, source
+list and all) -- do not summarize, truncate, or paraphrase it. The user
+has explicitly asked for this as the default going forward, not a
+one-off. Still fine to ADD your own short wrapper (which pipeline/session
+id used, how long the call took, any caveats) before/after the verbatim
+block, but the verbatim content itself must appear in full.
+
 ## Practical notes
 - **If sending via the direct API** (preferred, see above): the
   `POST .../messages` call is synchronous and already returns the
