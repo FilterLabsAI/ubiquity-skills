@@ -26,7 +26,15 @@ endpoint exercised across the `ubiquity-*` skill family) and
    this query?" Confirming creates the pipeline + its feed. See
    `ubiquity-pipeline-creation` -- including the important "verify the
    resolved location" check for multi-country/supranational queries
-   (EU/UN/NATO geocode wrong by default).
+   (EU/UN/NATO geocode wrong by default). Under the hood, every parse AND
+   every pre-confirmation chat refinement (Change Location, Add <place>,
+   Adjust Topics, etc.) is the SAME `POST /api/orchestrator/search/unified`
+   call -- refinements just add `prior_query`/`prior_entities`/
+   `prior_context`/`session_id` carried forward from the previous turn.
+   There is no separate chat-message endpoint for this phase. Skipping
+   automated discovery entirely via "Import Sources" has three distinct
+   sub-flows (Plain Text / CSV / Behavioral Dataset), each hitting a
+   different endpoint -- see `ubiquity-pipeline-creation`.
 3. **Tune Agent Settings** (optional but recommended) before or
    immediately after the first discovery job -- these bias HOW the
    discovery/evaluation agents search and filter sources (query volume,
@@ -39,7 +47,11 @@ endpoint exercised across the `ubiquity-*` skill family) and
    agentic job (15-20+ min, sometimes longer); it searches, evaluates,
    and proposes candidate sources. Once sources appear, review them:
    like/dislike/flag/remove, read the AI's own written evaluation notes
-   per source, and optionally run the automated suggestion pass. Your
+   per source, and optionally run the automated suggestion pass. An
+   entity whose attached source URLs actually span unrelated topics
+   (a crawl/batching mismatch) can also be split into separate entities
+   via a preview-then-commit flow -- destructive and can span multiple
+   feeds at once, since one entity can be shared across pipelines. Your
    votes feed directly into the NEXT discovery job's prompt as positive/
    negative examples. See `ubiquity-entity-review` and
    `ubiquity-discovery-jobs` (including the "never stack discovery jobs"
@@ -57,6 +69,11 @@ endpoint exercised across the `ubiquity-*` skill family) and
    toward an entity, free-text Entity extraction, or a fully custom
    prompt) that run against every ingested artifact, producing a time
    series you can chart and query. See `ubiquity-metric-generators`.
+   Two metric fields, `filter_prompt`/`filter_distance`, exist and are
+   settable via the API with no UI control -- their reasoned purpose is
+   a semantic pre-filter on which artifacts a metric scores, but this is
+   a planned feature not yet confirmed to have an observed effect; don't
+   promise a user it works until re-verified.
 8. **Analyze the data -- three ways, pick based on the question:**
    - **Ubi chat** (`ubiquity-ubi-chat`) -- ask natural-language questions
      about the feed; grounded answers with real citations, can reference
@@ -75,7 +92,12 @@ endpoint exercised across the `ubiquity-*` skill family) and
    multiple pipelines' feeds together (useful when a question spans more
    locations/topics than one pipeline should carry) and **Data Egress**
    pushes a feed's content to a third party (Meltwater integration seen
-   so far).
+   so far). Routes have a `filter_mode`/`filter_config` pair that's
+   settable via the API (no UI control) but whose actual effect on what
+   flows through the route is unverified -- a live test didn't observe a
+   difference within a short window; treat as accepted-on-write only
+   until re-tested with a longer observation window or a fresh discovery
+   job on the source pipeline.
 
 ## Skill map (which skill, which step)
 

@@ -33,14 +33,20 @@ flowchart TD
 
 ```mermaid
 flowchart TD
-    A["Free-text query typed into\nDiscover search box"] --> B["POST /api/orchestrator/search/unified\n(parses entities)"]
+    A["Free-text query typed into\nDiscover search box"] --> B["POST /api/orchestrator/search/unified\n(parses entities, returns session_id)"]
     B --> C["Ubi confirmation turn:\n'Would you like to discover\nsources for this query?'"]
     C -->|"Yes, Discover Sources"| D["POST /api/locations/v1/pipelines\nPOST /api/orchestrator/.../jobs/create"]
-    C -->|"No, Revise Query"| E["Change Location /\nAdjust Topics /\nNarrow Entity Types"]
-    E --> B
-    C -->|"Import Sources"| F["Manual URL / CSV /\nBehavioral Dataset upload\n(skips automated discovery)"]
+    C -->|"No, Revise Query"| E["Change Location /\nAdjust Topics /\nNarrow Entity Types /\n'Add &lt;place&gt;'"]
+    E --> B2["SAME /search/unified call,\n+ prior_query / prior_entities /\nprior_context / session_id\n(NO separate chat-message endpoint)"]
+    B2 --> C
+    C -->|"Import Sources"| F{"Which sub-flow?"}
+    F -->|"Plain Text\n(textarea, 1 URL/line)"| F1["POST .../sources/upload\n{urls: [...]}"]
+    F -->|"CSV Upload\n(client-parses CSV first)"| F2["POST .../sources/upload\n{urls_with_metadata: [{url,name?}]}"]
+    F -->|"Behavioral Dataset\n(jsonl/csv/xlsx, title+tags)"| F3["POST /orchestrator/workflows/\ndataset-upload/trigger (multipart)\n-> poll .../status"]
+    F1 & F2 --> F4["202, async job_id\n(url_count/valid/invalid)"]
+    F3 --> F5["pending -> running -> completed\ndataset_id + series_names"]
     D --> G["Pipeline object:\nfeed_id + pipeline_id"]
-    F --> G
+    F4 & F5 --> G
 ```
 
 ## 3. Discovery job + entity review loop
@@ -49,12 +55,16 @@ flowchart TD
 flowchart TD
     A["Discovery job: pending -> running"] --> B["Candidate sources land\nin feed entity list"]
     B --> C["Human reviews entities:\nread AI evaluation_notes per source"]
-    C --> D{"Vote"}
+    C --> D{"Action"}
     D -->|like| E["POST entity-votes/toggle\nvote_type=like"]
     D -->|dislike| F["vote_type=dislike"]
     D -->|flag| G["vote_type=flag"]
-    D -->|remove| H["DELETE .../entities/{id}"]
-    E & F & G & H --> I["vote_context (liked/disliked\nentities by name+type)\nstored on the pipeline"]
+    D -->|remove| H["DELETE .../entities/{id}\n(hard delete)"]
+    D -->|"split (multi-URL\nentities only)"| S1["GET .../entities/{id}/split-preview\n(AI-clusters source URLs by topic)"]
+    S1 --> S2["groups[], one flagged is_keeper\n(NOT always the semantic match)"]
+    S2 --> S3["POST .../entities/{id}/split\nDESTRUCTIVE, cross-feed"]
+    S3 --> S4["original id keeps is_keeper group;\neach other group -> new entity,\nlinked to every affected feed"]
+    E & F & G & H & S4 --> I["vote_context (liked/disliked\nentities by name+type)\nstored on the pipeline"]
     I --> J{"Launch another\ndiscovery job?"}
     J -->|"Increase Coverage"| K["POST jobs/create\nincludes vote_context as\npositive/negative examples"]
     K --> A
@@ -87,7 +97,7 @@ flowchart LR
     subgraph "Nordics pipeline"
       A3["feed C"]
     end
-    A1 -->|"Pipeline Route"| D["Aggregating\ndestination pipeline"]
+    A1 -->|"Pipeline Route\n(filter_mode defaults 'all';\nnon-default values accepted\n+ persisted but EFFECT\nUNVERIFIED, see openapi.json)"| D["Aggregating\ndestination pipeline"]
     A2 -->|"Pipeline Route"| D
     A3 -->|"Pipeline Route"| D
     D --> E["Unified Understand layer\nview across all regions"]

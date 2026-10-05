@@ -24,9 +24,12 @@ Query params observed in the UI:
   `type`, `created_at` ("Date Created").
 - `order`: `asc` | `desc`.
 - `type`: UI filter tabs are "All" / "Sources" / "Datasets" -- `type=all`
-  for everything, presumably `type=source` / `type=dataset` for the others
-  (confirm exact values against the live UI network tab before relying on
-  them -- not yet exercised with real data).
+  for everything, **CONFIRMED on the wire**: `type=sources` (plural) for
+  the Sources tab. `type=datasets` (plural, by the same pattern) is the
+  presumed value for the Datasets tab, though it was not independently
+  confirmed live (the test feed had 0 datasets, which disables that tab in
+  the UI) -- the plural form is strongly implied by `sources` being
+  plural, not singular as an earlier version of this skill guessed.
 
 Each entity's `metadata` object (CONFIRMED shape, from 178 real Germany
 renewable-energy entities) carries the fields the review workflow below
@@ -109,13 +112,121 @@ GET of the entities list in testing. Whether it lands in a recoverable
 "rejected" bucket (the UI's "Show Rejected (N)" toggle) or is gone for good
 was not confirmed -- treat removal as destructive until proven otherwise.
 
-### Split Entity -- not yet captured
-The "More options" menu's other item, "Split Entity", was not exercised (no
-obvious use case arose with a single-source entity during testing). Likely
-relevant for entities with multiple `sources[]` URLs that actually belong
-to different underlying entities -- capture its request shape the same way
-(install the interceptor, click it, see what dialog/call follows) before
-relying on it.
+### Split Entity -- CONFIRMED functional end-to-end (preview + commit), both endpoints captured
+**Correction**: an earlier pass of this skill wrongly concluded "Split
+Entity" was a non-functional stub because clicking the menu item fired no
+network call in that test. That conclusion was wrong -- the real flow was
+missed because the preview call is slow (AI clustering) and that earlier
+test didn't wait long enough / didn't have an XHR interceptor installed
+(Angular's HttpClient uses XHR for this call, not `fetch`). The full flow,
+confirmed on the wire including the destructive commit step:
+
+**1. Preview (read-only):**
+```
+GET /api/locations/api/v1/entities/<entity_id>/split-preview
+```
+Takes several seconds (AI clustering over the entity's source URLs) -- use
+the fire-and-forget pattern from `ubiquity-understand-layer`'s
+`metrics/preview` note if driving this via `browser_exec` (`js()`'s own
+`Runtime.evaluate` call has a short timeout that a direct
+`await fetch(...)` will blow through; fire the promise onto a `window`
+variable and poll it in a later call instead). Confirmed response shape
+(real example, entity 53920 "Rats in New York City", 12 total sources
+across 6 affected feeds):
+```json
+{
+  "entity_id": 53920, "entity_name": "Rats in New York City", "total_sources": 12,
+  "groups": [
+    {"group_name": "Papua New Guinea", "source_count": 5,
+     "source_ids": [247013, 246948, 246914, 246667, 246652],
+     "urls": ["//en.wikipedia.org/wiki/Politics_of_Papua_New_Guinea", ...],
+     "is_keeper": true},
+    {"group_name": "Rats in New York City", "source_count": 4,
+     "source_ids": [262810, 236914, 236913, 236912], "urls": [...], "is_keeper": false},
+    {"group_name": "Artificial Intelligence Act", "source_count": 2, "source_ids": [...], "urls": [...], "is_keeper": false},
+    {"group_name": "Liberal Democratic Federation of Hong Kong", "source_count": 1, "source_ids": [...], "urls": [...], "is_keeper": false}
+  ],
+  "discarded_urls": [],
+  "feeds_affected": [1668, 1640, 1619, 936, 1665, 1650]
+}
+```
+This targets exactly the "batch/crawl mismatch" problem (an entity whose
+attached source URLs actually belong to unrelated topics) -- the preview
+clusters the entity's source URLs by apparent topic and flags which
+cluster is the `is_keeper`. **`is_keeper` does NOT mean "the
+semantically-matching cluster"** -- in this example it landed on the
+unrelated "Papua New Guinea" cluster rather than the "Rats in New York
+City" cluster that actually matches the entity's own name, so don't
+assume the keeper group is the one a human would intuitively pick.
+`feeds_affected` matters: a single entity can be shared across MULTIPLE
+feeds/pipelines simultaneously (6 in this example), so a split is a
+cross-pipeline operation, not scoped to whichever pipeline's UI you
+clicked from.
+
+**CAVEAT -- the preview call appears to have result flakiness under rapid
+repeat calls**: in testing (open menu, click Split Entity, close, repeat
+within ~1-2s each time), one call returned a degenerate
+`"No split needed... All 12 sources... belong to the same real-world
+entity"` response instead of the 4-group breakdown every other call
+(both earlier and later, against the identical entity) returned. Root
+cause not isolated -- if you need a reliable preview, wait for the full
+~8-10s response rather than polling impatiently, and if you get a "no
+split needed" result on an entity you have reason to believe IS a
+mismatch (e.g. you can see unrelated URLs in its source list), retry once
+before trusting it.
+
+**2. Commit the split -- CONFIRMED, DESTRUCTIVE, cross-feed:**
+```
+POST /api/locations/api/v1/entities/<entity_id>/split
+Content-Type: application/json
+{"groups": [
+  {"group_name": "Papua New Guinea", "source_ids": [247013, 246948, 246914, 246667, 246652]},
+  {"group_name": "Rats in New York City", "source_ids": [262810, 236914, 236913, 236912]},
+  {"group_name": "Artificial Intelligence Act", "source_ids": [258566, 246951]},
+  {"group_name": "Liberal Democratic Federation of Hong Kong", "source_ids": [245588]}
+]}
+```
+(same `groups` the preview returned, but each entry trimmed to just
+`group_name`+`source_ids` -- `source_count`/`urls`/`is_keeper` are
+preview display-only and not sent back). `200 OK` response:
+```json
+{
+  "original_entity_id": 53920, "original_entity_sources_kept": 5,
+  "new_entities": [
+    {"id": 57941, "uuid": "4a3c44f8-...", "name": "Rats in New York City", "source_count": 4},
+    {"id": 57942, "uuid": "3cb22412-...", "name": "Artificial Intelligence Act", "source_count": 2},
+    {"id": 57943, "uuid": "864b4bba-...", "name": "Liberal Democratic Federation of Hong Kong", "source_count": 1}
+  ],
+  "discarded_urls": [],
+  "feeds_linked": [1668, 1640, 1619, 936, 1665, 1650]
+}
+```
+**Key mechanics, all confirmed live:**
+- The ORIGINAL `entity_id` is preserved and keeps whichever group was
+  flagged `is_keeper` in the preview -- in this example that meant the
+  original id 53920 (still named "Rats in New York City" in its own
+  metadata, unaffected by the group reassignment) now only carries the 5
+  Papua-New-Guinea-topic sources, NOT the New-York-rats-topic sources its
+  name suggests. **The entity's display `name` is NOT automatically
+  updated to match its new (possibly unrelated) source content** -- if
+  you split an entity, check whether its name still makes sense
+  afterward and consider renaming it (no rename endpoint confirmed in
+  this skill family yet).
+- Every NON-keeper group becomes a brand-new entity with a new numeric
+  `id`/`uuid`, named after that group's `group_name`, and is linked
+  (`feeds_linked`) to EVERY feed the original entity was in -- a split
+  multiplies entity count across all affected feeds at once, not just the
+  feed you were viewing when you triggered it.
+- `original_entity_sources_kept` (5) matches the `is_keeper` group's
+  `source_count` from the preview, confirming the kept/split accounting.
+- The original entity's own `updated_at` timestamp bumps (confirmed via a
+  follow-up `GET /entities/<id>`); its `uuid` does NOT change.
+- This is DESTRUCTIVE and not scoped to a single pipeline -- treat it
+  like `Remove from Pipeline` in terms of needing explicit user
+  confirmation before executing on a real/production entity, especially
+  since the `is_keeper` assignment can be counterintuitive (see above)
+  and a user reviewing only the preview's group names might not
+  immediately notice which group keeps the original id.
 
 ### Interceptor pattern used to capture the above
 ```js
@@ -142,10 +253,19 @@ override too (see `ubiquity-discovery-jobs` for the pattern) or just poll
 `performance.getEntriesByType('resource')` for URL strings when `fetch`
 hooking comes up empty -- it catches both.
 
-## Downloading results
-"Download CSV" button on the Discover tab exports the current entity list;
-likely `GET /api/locations/api/v1/feeds/<feed_id>/entities/export` or a
-variant with `?format=csv` -- not yet confirmed on the wire.
+## Downloading results -- CONFIRMED: client-side CSV, no export endpoint
+"Download CSV" on the Discover tab does NOT call a dedicated export
+endpoint. Confirmed on the wire: clicking it fires exactly these two
+calls, then builds the CSV in the browser from the joined results:
+```
+GET /api/locations/api/v1/feeds/<feed_id>/entities?limit=1000&offset=0
+GET /api/locations/v1/entity-votes/pipeline/<pipeline_id>?limit=500
+```
+(the first with no `type`/`q`/`order_by` params -- i.e. it always fetches
+ALL entities up to the 1000 cap, ignoring whatever filter/sort/search was
+active in the UI at the time of the click). If scripting a CSV export
+yourself, just call these same two endpoints and join on `entity_id`
+client-side -- there is nothing server-side to call instead.
 
 ## Full free-text AI evaluation notes per source -- CONFIRMED
 The structured `credibility_score`/`quality`/`local_focus`/`type` fields on

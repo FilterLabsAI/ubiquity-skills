@@ -39,12 +39,43 @@ Response echoes back a structured `refresh_interval` object, not minutes:
 (a Postgres `interval`-style struct serialized by the backend -- `Valid:
 `"Valid: false"`/all-zero fields means "Do Not Update"/unset). Also returned:
 `refreshed_at` (last refresh timestamp), plus three OTHER interval fields
-that are NOT exposed in this UI panel but exist on the feed resource:
-`deletion_detection_interval`, `engagement_detection_interval`,
-`automatic_entity_rediscovery_interval` (all `Valid: false` by default --
-presumably configurable elsewhere or reserved for future UI, not yet
-exercised), plus `force_review_for_auto_discover` and `backdate_limit`
-(both `null` so far).
+that are NOT exposed in this UI panel but exist on the feed resource and
+ARE settable via this same PUT, **CONFIRMED on the wire**:
+```
+PUT /api/locations/api/v1/feeds/<feed_id>
+{"name": "...", "refresh_interval_minutes": 1440,
+ "deletion_detection_interval_minutes": 10080,
+ "engagement_detection_interval_minutes": 720,
+ "automatic_entity_rediscovery_interval_minutes": 43200,
+ "force_review_for_auto_discover": true, "backdate_limit": 30}
+```
+All five accepted and persisted (response echoed each as its own
+`{Microseconds,...}` struct, same shape as `refresh_interval`). Field
+notes:
+- `deletion_detection_interval_minutes` / `engagement_detection_interval_minutes`
+  / `automatic_entity_rediscovery_interval_minutes`: same minutes-in,
+  struct-out convention as `refresh_interval_minutes` -- no UI control
+  exists for these, but the backend accepts and stores them via direct PUT.
+  Their actual effect (what the deletion-detection/engagement-detection/
+  entity-rediscovery background jobs DO with these intervals) was not
+  independently verified -- only that the field is settable and persists.
+- `force_review_for_auto_discover` (bool): accepted as `true`/`false`.
+- `backdate_limit`: **CONFIRMED type is `int32`, NOT a date string** --
+  sending a `"YYYY-MM-DD"` string 400s with
+  `"json: cannot unmarshal string into Go struct field .backdate_limit of
+  type int32"`. Sending a plain int (e.g. `30`) succeeds and is stored
+  as-is (not wrapped in a `{Microseconds,...}` struct like the interval
+  fields) -- almost certainly a day-count, not minutes, given the name and
+  the fact it isn't struct-wrapped like the true intervals, but the exact
+  unit wasn't independently confirmed.
+- **Pitfall confirmed**: this feed resource's `metadata` field (separate
+  from `pipeline.metadata`) got silently wiped to `null` after this PUT,
+  because the PUT body didn't include it and this is a full replace, not a
+  partial patch -- same "must re-send everything" pattern as `name`
+  documented below, but it bit an UNLISTED field here. If a feed has a
+  non-null `metadata` you want to keep, `GET` the feed first and include
+  its current `metadata` verbatim in the PUT body, not just `name` and
+  whatever interval fields you're changing.
 
 **Confirmed live: changing the dropdown AUTO-SAVES immediately on
 `change`, no separate Save button.** Driving this with `browser_exec`:

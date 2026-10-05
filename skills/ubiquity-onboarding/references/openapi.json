@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.0.0",
-    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section)."
+    "version": "1.1.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description)."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
@@ -33,9 +33,18 @@
     },
     "/orchestrator/search/unified": {
       "post": {
-        "summary": "Parse a free-text query into LOCATION/TOPIC/entity-type entities",
-        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"query": {"type": "string"}}}}}},
-        "responses": {"200": {"description": "entities[], location_uuid, location{id,name,country,coordinates,bounding_box,is_multi_location,component_locations}"}}
+        "summary": "Parse a free-text query into LOCATION/TOPIC/entity-type entities. ALSO serves as the chat-refine endpoint -- there is no separate 'send a chat message' call for the pre-confirmation Discover chat (Change Location / Add <place> / Adjust Topics / etc. all re-call this same endpoint with prior_query/prior_entities/prior_context/session_id added).",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "query": {"type": "string"},
+          "limit": {"type": "integer", "example": 20},
+          "max_new_sources": {"type": "integer", "example": 100},
+          "include_suggestions": {"type": "boolean"},
+          "prior_query": {"type": "string", "description": "REFINE TURNS ONLY: previous turn's query string, verbatim"},
+          "prior_entities": {"type": "object", "description": "REFINE TURNS ONLY: previous turn's parsed_entities object, verbatim"},
+          "prior_context": {"type": "string", "description": "REFINE TURNS ONLY: previous turn's context_report string, verbatim"},
+          "session_id": {"type": "string", "description": "REFINE TURNS ONLY: previous turn's response session_id, verbatim"}
+        }}}}},
+        "responses": {"200": {"description": "existing_sources[], discovery_job_id, parsed_entities{locations,topics,entity_types,persons,organizations,events}, context_report, suggestions[], stats, location{id,name,country,coordinates,bounding_box,is_multi_location,component_locations}, entity_changes{added,removed,modified}, confidence, reasoning, query, session_id"}}
       }
     },
     "/locations/v1/pipelines": {
@@ -68,7 +77,8 @@
                 "max_queries": {"type": "integer", "minimum": 5, "maximum": 50},
                 "creativity_level": {"type": "string", "enum": ["low", "medium", "high"]},
                 "focus_types": {"type": "array", "items": {"type": "string", "enum": ["news", "government", "blog", "community", "social"]}},
-                "language_preference": {"type": "string", "enum": ["native_first", "mixed", "english_first"]}
+                "language_preference": {"type": "string", "enum": ["native_first", "mixed", "english_first"]},
+                "custom_instructions": {"type": "string", "description": "CONFIRMED key for the Search Generation Agent's free-text 'Custom Instructions' field"}
               }},
               "evaluation": {"type": "object", "properties": {
                 "credibility_threshold": {"type": "number", "minimum": 0, "maximum": 1},
@@ -94,7 +104,11 @@
       "post": {
         "summary": "Create a route from this (source) pipeline to a destination pipeline",
         "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
-        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"destination_pipeline_id": {"type": "string"}}}}}},
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "destination_pipeline_id": {"type": "string"},
+          "filter_mode": {"type": "string", "default": "all", "description": "ACCEPTED ON WRITE (e.g. 'liked_only' is echoed back and persisted), but EFFECT UNVERIFIED -- a live test did not observe entities flowing differently after setting this and triggering sync within ~20s. No UI control exists for this field; API-only."},
+          "filter_config": {"type": "object", "default": {}, "description": "Same caveat as filter_mode -- accepted and persisted, effect on actual routing unverified."}
+        }}}}},
         "responses": {"201": {"description": "route object: id, source_pipeline_id, destination_pipeline_id, enabled, filter_mode, filter_config"}}
       }
     },
@@ -124,7 +138,7 @@
     },
     "/locations/api/v1/feeds/{feed_id}/entities": {
       "get": {
-        "summary": "List discovered entities (sources/datasets) for a feed",
+        "summary": "List discovered entities (sources/datasets) for a feed. Also the basis of CSV export -- 'Download CSV' is purely client-side: it calls this endpoint with limit=1000/offset=0 (no type/q/order_by) plus GET /locations/v1/entity-votes/pipeline/{pipeline_id}?limit=500, and joins them into a CSV in-browser. No dedicated export endpoint exists.",
         "parameters": [
           {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}},
           {"name": "limit", "in": "query", "schema": {"type": "integer"}},
@@ -132,7 +146,7 @@
           {"name": "q", "in": "query", "schema": {"type": "string"}},
           {"name": "order_by", "in": "query", "schema": {"type": "string", "enum": ["vote", "name", "type", "created_at"]}},
           {"name": "order", "in": "query", "schema": {"type": "string", "enum": ["asc", "desc"]}},
-          {"name": "type", "in": "query", "schema": {"type": "string", "example": "all"}}
+          {"name": "type", "in": "query", "schema": {"type": "string", "enum": ["all", "sources", "datasets"], "description": "CONFIRMED plural form 'sources'; 'datasets' inferred by the same pattern, not independently confirmed live (test feed had 0 datasets)"}}
         ],
         "responses": {"200": {"description": "{entities[], total, dataset_count, source_count}"}}
       }
@@ -143,11 +157,67 @@
         {"name": "entity_id", "in": "path", "required": true, "schema": {"type": "integer"}}
       ], "responses": {"200": {"description": "{message: 'Entity removed from feed successfully'}"}}}
     },
+    "/locations/api/v1/entities/{entity_id}/split-preview": {
+      "get": {
+        "summary": "AI-cluster an entity's source URLs by apparent topic, as a preview before splitting. Slow (several seconds, AI clustering) -- use fire-and-forget when calling via browser automation. Observed one flaky 'No split needed' result under rapid repeated calls; treat as retry-worthy if a mismatch is suspected.",
+        "parameters": [{"name": "entity_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "responses": {"200": {"description": "{entity_id, entity_name, total_sources, groups: [{group_name, source_count, source_ids[], urls[], is_keeper}], discarded_urls[], feeds_affected[]}. is_keeper does NOT reliably land on the semantically-matching group -- inspect per call."}}
+      }
+    },
+    "/locations/api/v1/entities/{entity_id}/split": {
+      "post": {
+        "summary": "DESTRUCTIVE, cross-feed: commit a split previewed above. The entity_id's original row keeps whichever group was is_keeper in the preview (name is NOT auto-updated to match); every other group becomes a brand-new entity linked to every feed the original was in.",
+        "parameters": [{"name": "entity_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "groups": {"type": "array", "items": {"type": "object", "properties": {
+            "group_name": {"type": "string"}, "source_ids": {"type": "array", "items": {"type": "integer"}}
+          }}, "description": "same groups the preview returned, trimmed to just group_name+source_ids"}
+        }}}}},
+        "responses": {"200": {"description": "{original_entity_id, original_entity_sources_kept, new_entities: [{id, uuid, name, source_count}], discarded_urls[], feeds_linked[]}"}}
+      }
+    },
+    "/locations/api/v1/entities/{entity_id}": {
+      "get": {"summary": "Get a single entity's raw record (location, metadata as base64, timestamps)", "parameters": [{"name": "entity_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "entity object"}}}
+    },
     "/locations/api/v1/source-evaluation-logs/by-url": {
       "get": {
         "summary": "Full free-text AI evaluation reasoning for a discovered source, keyed by its URL",
         "parameters": [{"name": "url", "in": "query", "required": true, "schema": {"type": "string"}}],
         "responses": {"200": {"description": "{id, credibility_score, local_focus, quality, evaluation_details:{type,title,evaluation_notes,...}}"}}
+      }
+    },
+    "/locations/api/v1/feeds/{feed_id}/sources/upload": {
+      "post": {
+        "summary": "Import Sources -- Plain Text and CSV Upload sub-flows (both hit this one endpoint, differing only in payload shape). CSV parsing/preview happens CLIENT-SIDE before this call; this endpoint always just takes a final URL list. Async -- returns 202 immediately, no confirmed polling endpoint for job_id's own progress captured yet.",
+        "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "skip_validation": {"type": "boolean"},
+          "location_uuid": {"type": "string"},
+          "urls": {"type": "array", "items": {"type": "string"}, "description": "Plain Text sub-flow: array of raw URL strings"},
+          "urls_with_metadata": {"type": "array", "items": {"type": "object", "properties": {"url": {"type": "string"}, "name": {"type": "string"}}}, "description": "CSV Upload sub-flow: array of {url, name?} objects, mutually exclusive with urls"}
+        }}}}},
+        "responses": {"202": {"description": "{job_id, feed_id, url_count, valid_urls, invalid_urls, status: processing, message}"}}
+      }
+    },
+    "/orchestrator/workflows/dataset-upload/trigger": {
+      "post": {
+        "summary": "Import Sources -- Behavioral Dataset sub-flow. Entirely separate endpoint family from sources/upload. Multipart file upload (jsonl/csv/xlsx, max 25MB) plus form fields read off the live UI form.",
+        "requestBody": {"content": {"multipart/form-data": {"schema": {"type": "object", "properties": {
+          "dataset_title": {"type": "string", "description": "required"},
+          "dataset_behavior": {"type": "string", "description": "optional free-text tag, e.g. 'consumer-spending'"},
+          "dataset_unit": {"type": "string", "description": "optional, e.g. 'Percent of 2019'"},
+          "dataset_source_url": {"type": "string", "format": "uri", "description": "optional"},
+          "dataset_description": {"type": "string", "description": "optional, free text for analysts/Ubi"},
+          "dataset_external_id": {"type": "string", "description": "optional, defaults to auto-generated-from-filename if omitted"}
+        }}, "description": "exact multipart field name the file itself is attached under was not isolated by this skill's fetch/XHR interceptor (FormData bodies aren't serialized readably by it) -- inspect a raw HTTP capture if scripting this outside the browser"}}},
+        "responses": {"200": {"description": "job object: {job_id, status: pending, progress: 0.0, dataset_id: null, series_names: [], observations_stored: 0, skipped_rows: 0, warnings: [], error: null, created_at, updated_at, completed_at: null}"}}
+      }
+    },
+    "/orchestrator/workflows/dataset-upload/{job_id}/status": {
+      "get": {
+        "summary": "Poll a Behavioral Dataset upload job. Confirmed lifecycle pending(0.0) -> running(0.5) -> completed(1.0) within ~3s for a trivial file.",
+        "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "same shape as trigger's response; on completion: dataset_id populated, series_names derived from the file's non-date column header(s), observations_stored/skipped_rows/warnings populated"}}
       }
     },
     "/orchestrator/api/v1/jobs/create": {
@@ -200,13 +270,18 @@
     "/locations/api/v1/feeds/{feed_id}": {
       "get": {"summary": "Get feed (refresh_interval as human string, e.g. '12 hours')", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "feed object"}}},
       "put": {
-        "summary": "Full update -- used for rename and for Data Refresh Interval (same underlying field as 'Enable Ubi' toggle)",
+        "summary": "Full update -- used for rename, Data Refresh Interval (same underlying field as 'Enable Ubi' toggle), and several UI-less interval/review fields. This is a full PUT, not a partial PATCH -- omitted fields (including the feed's own metadata object) get wiped to null/default, so GET first and re-send unchanged fields.",
         "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "name": {"type": "string", "description": "must be re-sent, this is a full PUT not a partial PATCH"},
-          "refresh_interval_minutes": {"type": "integer", "description": "0=Do Not Update, 720=12h, 1440=Daily, 2880=Every 2 Days, 10080=Weekly, ~43200=Monthly"}
+          "refresh_interval_minutes": {"type": "integer", "description": "0=Do Not Update, 720=12h, 1440=Daily, 2880=Every 2 Days, 10080=Weekly, ~43200=Monthly"},
+          "deletion_detection_interval_minutes": {"type": "integer", "description": "CONFIRMED settable via direct PUT; no UI control; actual background-job effect not independently verified"},
+          "engagement_detection_interval_minutes": {"type": "integer", "description": "CONFIRMED settable via direct PUT; no UI control; actual background-job effect not independently verified"},
+          "automatic_entity_rediscovery_interval_minutes": {"type": "integer", "description": "CONFIRMED settable via direct PUT; no UI control; actual background-job effect not independently verified"},
+          "force_review_for_auto_discover": {"type": "boolean", "description": "CONFIRMED settable via direct PUT; no UI control"},
+          "backdate_limit": {"type": "integer", "description": "CONFIRMED type is int32 (NOT a date string -- sending YYYY-MM-DD 400s). Likely a day-count given the name and that it isn't struct-wrapped like the true intervals, but exact unit unconfirmed."}
         }}}}},
-        "responses": {"200": {"description": "feed with refresh_interval{Microseconds,Days,Months,Valid} struct, refreshed_at"}}
+        "responses": {"200": {"description": "feed with refresh_interval{Microseconds,Days,Months,Valid} struct (same struct shape for every *_interval field above), refreshed_at"}}
       }
     },
     "/locations/api/v1/feeds/{feed_id}/metric_prompts": {
@@ -216,10 +291,22 @@
         "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}],
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "feed_id": {"type": "integer"}, "name": {"type": "string"}, "metric_name": {"type": "string", "description": "client-generated slug of name"},
-          "prompt": {"type": "string"}, "active": {"type": "boolean"}
+          "prompt": {"type": "string"}, "active": {"type": "boolean"},
+          "filter_prompt": {"type": "string", "nullable": true, "description": "PLANNED FEATURE, not UI-exposed: accepted and persisted on write. Reasoned (not confirmed) purpose: a semantic pre-filter prompt gating which artifacts get scored by this metric. An earlier claim of a confirmed live effect was retracted -- it was based on a single happenstance before/after reading with no baseline/control/repeat. Treat as accepted-but-unverified-in-effect."},
+          "filter_distance": {"type": "number", "nullable": true, "description": "PLANNED FEATURE, same caveat as filter_prompt -- reasoned likely purpose is a vector-distance/similarity cutoff for that pre-filter, not confirmed by observed effect."}
         }}}}},
         "responses": {"200": {"description": "metric prompt object: id, feed_id, name, metric_name, prompt, filter_prompt, filter_distance, active, created_at, updated_at"}}
       }
+    },
+    "/locations/api/v1/feeds/{feed_id}/metric_prompts/{metric_id}": {
+      "put": {"summary": "Edit a metric generator directly (preferred over driving the Angular edit modal -- no partial PATCH support, this resource only takes full PUT)", "parameters": [
+        {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "metric_id", "in": "path", "required": true, "schema": {"type": "string"}}
+      ], "responses": {"200": {"description": "updated metric prompt object"}}},
+      "delete": {"summary": "Delete a metric generator", "parameters": [
+        {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}},
+        {"name": "metric_id", "in": "path", "required": true, "schema": {"type": "string"}}
+      ], "responses": {"204": {"description": "empty"}}}
     },
     "/understand/chat/sessions": {
       "get": {
@@ -255,13 +342,13 @@
         "responses": {"200": {"description": "array: {id, session_id, role, content, citations[{id,url,score,title}], chart{type,title,config}, created_at}"}}
       },
       "post": {
-        "summary": "Send a message, get Ubi's reply (also implicitly creates the session on the first call)",
+        "summary": "Send a message, get Ubi's reply (also implicitly creates the session on the first call). This is a DIFFERENT chat system from /orchestrator/search/unified's refine loop above -- this one is the standing per-feed Understand-tab chat, that one is discovery-time query parsing/refinement.",
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"content": {"type": "string"}}}}}},
         "responses": {"200": {"description": "assistant message object; response latency ~15-25s plain, ~40s+ for chart requests"}}
       }
     },
     "/understand/artifacts/count/{feed_id}": {
-      "get": {"summary": "Count ingested artifacts for a feed", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "{count, feed_id}"}}}
+      "get": {"summary": "Count ingested artifacts for a feed. CONFIRMED UNRELIABLE -- observed returning the identical value for multiple different feeds including one with zero real content. Use artifacts/preview's total_count instead.", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "{count, feed_id} -- do not trust as per-feed"}}}
     },
     "/understand/artifacts/preview": {
       "post": {
@@ -277,7 +364,7 @@
           "limit": {"type": "integer", "description": "accepted but ignored -- see summary"}
         }}}}},
         "responses": {
-          "200": {"description": "{artifacts: [{id, headline, url, site_type, published_at, content_sample, score}]}"},
+          "200": {"description": "{artifacts: [{id, headline, url, site_type, published_at, content_sample, score}], total_count}"},
           "500": {"description": "'Collection <email> doesn't exist' -- normal/expected before any artifacts have been ingested yet, not a real error"}
         }
       }

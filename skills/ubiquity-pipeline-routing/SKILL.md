@@ -53,6 +53,30 @@ adds `source_pipeline_name`, `destination_pipeline_name`, `source_feed_id`,
 `filter_mode`/`filter_config` default to `"all"`/`{}` -- these look like
 hooks for routing only a subset of entities (e.g. by vote status or topic)
 but no UI control for them was found; likely API-only for now.
+**CONFIRMED API-only write path**: `POST .../routes` accepts and echoes
+back arbitrary values for both fields with no server-side validation
+observed -- a test call with `{"filter_mode": "liked_only",
+"filter_config": {"min_credibility": 0.5}}` returned `201` with those
+exact values persisted (`GET` afterward echoed the same).
+**Effect NOT yet confirmed**: a live test created a `liked_only` route
+from a pipeline with 15 liked entities (NYC rat-mitigation, feed 1668) to
+a route-wise-empty destination pipeline (feed 1670, 47 pre-existing
+entities from its own discovery), clicked the pipeline detail page's
+"Trigger Sync" button (fired no observable network call under an XHR/
+fetch interceptor -- either it's not wired to a request this skill's
+interceptor pattern catches, or sync is scheduled/background rather than
+an immediate on-click call), and re-checked the destination feed's
+entity count ~15-20s later: still 47, no new entities appeared. This is
+inconclusive, not a negative result -- route-based entity flow may simply
+be slower than tested (e.g. a periodic background job, not something
+"Trigger Sync" kicks off instantly), or may require `auto_sync_enabled`/
+`sync_on_job_completion`-style conditions beyond just the route existing.
+Treat `filter_mode`/`filter_config` values as accepted-on-write but
+UNVERIFIED in effect -- don't promise a user that setting `liked_only`
+will filter what flows through until this is re-tested with a longer
+observation window or by triggering a fresh discovery job on the source
+pipeline (which is confirmed to sync afterward per `sync_on_job_completion`)
+rather than relying on the on-demand "Trigger Sync" button alone.
 Delete: `DELETE .../routes/<route_id>` -> `204` empty body.
 
 ### UI mechanics (DOM quirks worth knowing if automating)
