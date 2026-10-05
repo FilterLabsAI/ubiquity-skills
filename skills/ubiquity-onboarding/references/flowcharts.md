@@ -12,7 +12,7 @@ flowchart TD
     B2 --> B
     C -- Yes --> D["Confirm: 'Yes, Discover Sources'"]
     D --> E["Pipeline + feed created\n(POST /pipelines, jobs/create)"]
-    E --> F["Tune Agent Settings\n(optional, recommended)"]
+    E --> F["Tune Agent Settings\n(optional, recommended)\nGET/PATCH /pipelines/{id} directly --\nQuick Presets are client-side only,\nnothing persists until PATCH fires"]
     F --> G["Discovery job runs\n(15-20+ min, async)"]
     G --> H["Review discovered entities\nlike / dislike / flag / remove"]
     H --> I{"Happy with\ncoverage?"}

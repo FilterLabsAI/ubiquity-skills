@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.1.0",
-    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description)."
+    "version": "1.2.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
@@ -68,7 +68,7 @@
       "get": {"summary": "Get a pipeline (feed_id, agent_config, discovery_config, search_filters)", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "pipeline object"}}},
       "put": {"summary": "Full update, e.g. rename", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated pipeline"}}},
       "patch": {
-        "summary": "Update metadata.agent_config / discovery_config (Agent Settings save) -- whole metadata object must be re-sent, not a partial diff",
+        "summary": "Update metadata.agent_config / discovery_config -- THIS is the Agent Settings 'Save Settings' endpoint (see ubiquity-agent-settings), re-confirmed live off a real Save Settings click. Whole metadata object must be re-sent, not a partial diff. Quick Presets (Balanced/Social Media Boost/News Focus/Behavioral Datasets Boost) are CONFIRMED pure client-side form state -- clicking one fires zero network calls; nothing persists until this PATCH actually fires via Save Settings (or is called directly).",
         "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "metadata": {"type": "object", "properties": {
