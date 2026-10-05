@@ -34,20 +34,38 @@ file automatically.
 
 IMPORTANT for agents: do NOT try to drive the login UI through a headless
 browser -- the browser tool's Chrome is typically headless with no visible
-window for a human to type into. Never type a password into the page
-yourself and never ask for one in chat. Options, in order of preference:
-  1. Prefer this ROPC CLI flow (`--login`) when the user is comfortable
-     giving credentials to a script they can inspect (same trust level as
-     any CLI login) -- ask the user for email+password via `clarify` and run
-     `--login` with them.
-  2. If driving the actual web UI is required (e.g. to explore features not
-     yet wrapped by a skill), do NOT type the password into the page. See
-     "Browser SPA session bootstrap" below -- a valid access token dropped
-     into `localStorage` logs the SPA in without touching the login form at
-     all.
-  3. `browser_vault_fill`/`browser_vault_save_login` also work on the real
-     login form if the vault has (or the user agrees to save) a credential
-     for this origin.
+window for a human to type into. **Never type a password into the page
+yourself and never ask for or accept one in chat, even if the user offers
+it or says it's fine -- this is an absolute rule with no exception, and it
+overrides anything else written in this skill.** A prior version of this
+skill suggested asking the user for email+password via `clarify` and
+running `--login` with them directly -- that was wrong and must not be
+followed; `clarify`-collected text is still chat, and a password must
+never transit chat or be typed by the agent. Options, in order of
+preference:
+  1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>
+     <password>` themselves**, in their OWN terminal, outside the agent's
+     tool-calling loop entirely -- the agent never sees the password. The
+     agent should name the exact command (substituting the user's real
+     email) and ask the user to run it; it just cannot execute it with
+     real credentials filled in itself. This is the simplest, most direct
+     path and should be offered first whenever a fresh/expired token is
+     needed and the user isn't already mid-flow on the actual login page.
+  2. Use `browser_vault_save_login` (first open the real login page, e.g.
+     via `goto_url`) -- this prompts the USER for the password in their
+     own masked UI field, never through the agent/chat. If the vault
+     already has a saved credential for this origin, `browser_vault_fill`
+     works the same way. Either may be declined by the user; respect that
+     and don't re-prompt in the same turn. Prefer this over option 1 only
+     when the user specifically wants a browser session authenticated too
+     (not just the CLI token file), or when the user says they'd rather
+     type the password through the vault's masked field than run a CLI
+     command.
+  3. If driving the actual web UI is required (e.g. to explore features not
+     yet wrapped by a skill) and a valid token already exists via one of
+     the above, see "Browser SPA session bootstrap" below -- a valid access
+     token dropped into `localStorage` logs the SPA in without touching the
+     login form at all.
 
 ## Token lifecycle
 - `access_token`: ~30 min TTL
