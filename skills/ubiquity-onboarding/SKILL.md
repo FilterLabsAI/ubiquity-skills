@@ -39,10 +39,14 @@ endpoint exercised across the `ubiquity-*` skill family) and
    immediately after the first discovery job -- these bias HOW the
    discovery/evaluation agents search and filter sources (query volume,
    creativity, language preference, credibility/quality thresholds,
-   custom instructions). Settings only apply going FORWARD, never
-   retroactively. See `ubiquity-agent-settings` for a full
-   recommendation strategy by use case (news monitoring, social/sentiment,
-   government/policy, economic data).
+   custom instructions). Settings live under the pipeline object's own
+   `metadata.agent_config`/`metadata.discovery_config` -- `GET`/`PATCH`
+   `/api/locations/v1/pipelines/<pipeline_id>` directly, no UI required
+   (Quick Presets are pure client-side form state; nothing persists until
+   the PATCH fires). Settings only apply going FORWARD, never
+   retroactively. See `ubiquity-agent-settings` for the full read/write
+   API calls plus a recommendation strategy by use case (news monitoring,
+   social/sentiment, government/policy, economic data).
 4. **Run the discovery job and review entities.** Discovery is a slow
    agentic job (15-20+ min, sometimes longer); it searches, evaluates,
    and proposes candidate sources. Once sources appear, review them:
