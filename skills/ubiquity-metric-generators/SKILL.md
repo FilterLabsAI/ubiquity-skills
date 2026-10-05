@@ -71,8 +71,9 @@ Content-Type: application/json
   "active": true
 }
 ```
-`200 OK`, response adds `id` (uuid), `filter_prompt` (null, seen so far),
-`filter_distance` (null, seen so far), `created_at`, `updated_at`:
+`200 OK`, response adds `id` (uuid), `filter_prompt` (null unless set,
+see below), `filter_distance` (null unless set, see below), `created_at`,
+`updated_at`:
 ```json
 {"id": "<METRIC_GEN_UUID>", "feed_id": "<FEED_ID>", "name": "Sentiment",
  "metric_name": "sentiment", "prompt": "...", "filter_prompt": null,
@@ -134,6 +135,42 @@ the DOM anyway (e.g. for a human-driven walkthrough), scope your button
 lookup to inside the metric-editor container rather than grabbing the
 first/any button whose text is "Save", or you'll accidentally PUT the
 pipeline/feed/saved-search name instead.
+
+## `filter_prompt` / `filter_distance` -- CONFIRMED settable, planned feature not yet observed to have an effect
+Both fields accept and persist arbitrary values via direct `POST`/`PUT` to
+`metric_prompts` even though no UI control for them was found on the "New
+Metric"/"Edit Metric Generator" forms (only `name`/`Active`/`Prompt` are
+exposed there). Confirmed live:
+```json
+{"filter_prompt": "Only consider text that mentions rats", "filter_distance": 0.3}
+```
+echoed back verbatim (`filter_distance` as a float, e.g. `0.300000`).
+
+Based on the field names and the vector-store-backed nature of this
+platform (see `ubiquity-data-feed-api`'s `include_vectors` param), the
+reasoned purpose is a semantic pre-filter: `filter_prompt` would be
+embedded and compared against each artifact before scoring (skip scoring
+artifacts that don't match this prompt), with `filter_distance` as the
+vector-distance/similarity cutoff for that pre-filter.
+
+**Correction -- an earlier pass of this skill wrongly marked this
+CONFIRMED based on a happenstance result.** A test created a metric with
+an intentionally off-topic `filter_prompt` ("Mentions of Papua New
+Guinea" on a NYC rat-mitigation feed) and saw `metrics/preview` return
+`total_count: 0` for it vs. `total_count: 5` for the feed's plain
+`sentiment` metric in the same window -- but a single before/after
+reading on live, independently-fluctuating data is not evidence of
+causation, and this was never cross-checked against a baseline (e.g. the
+same off-topic metric WITHOUT `filter_prompt` set, to rule out the zero
+coming from something else entirely -- scoring lag, an unrelated query
+issue, etc.). **Treat `filter_prompt`/`filter_distance` as fields the API
+accepts and stores, with a well-reasoned likely purpose, but NOT yet
+confirmed to actually gate scoring -- a planned/future feature as far as
+observed behavior goes, not a verified one.** Re-test properly before
+relying on this: create two metrics identical except for `filter_prompt`,
+compare `metrics/preview` `total_count`/`data` on the SAME feed/date
+range/prompt-scoring-logic, and ideally repeat to rule out noise, before
+upgrading this section back to CONFIRMED.
 
 ## Viewing metric output
 There is no separate per-metric "results" GET -- computed metric values

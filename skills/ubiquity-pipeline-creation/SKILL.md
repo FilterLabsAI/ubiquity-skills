@@ -320,29 +320,73 @@ high) vs. multiple-pipelines-routed-together (more setup, better
 per-location coverage, avoids the persistence ceiling, and each sub-
 pipeline can be independently retuned/re-discovered).
 
-## Step 1: parse a free-text query into structured filters
+## Step 1: parse a free-text query into structured filters -- CONFIRMED on the wire
 The Discover UI's search box ("Describe a location and optional topic to
 get started") kicks off:
 ```
 POST /api/orchestrator/search/unified
-```
-Exact request body not yet confirmed from the wire (reverse-engineer with
-browser devtools / `browser_exec` network capture if you need the literal
-schema) -- but functionally it takes the raw query string and returns parsed
-entities you can see rendered as chips in the UI:
-```json
-{"entities": [
-  {"type": "location", "value": "European Union", "languages": ["en","fr",...], "confidence": 1},
-  {"type": "topic", "value": "artificial intelligence regulation", "confidence": 1},
-  {"type": "entity_type", "value": "news", "confidence": 1},
-  {"type": "entity_type", "value": "social media", "confidence": 1}
-], "location_uuid": "..."}
+Content-Type: application/json
+{"query": "News about renewable energy in Germany", "limit": 20,
+ "max_new_sources": 100, "include_suggestions": true}
 ```
 A location is required; topic and entity_type (news/social media/etc.) are
 optional refinements. Write queries as natural language, e.g. "News and
 social media about artificial intelligence regulation in the European
 Union" -- the location, topic, and source-type filters are all extracted
 from one free-text sentence, same philosophy as Scout search.
+
+Confirmed response shape (fuller than previously documented):
+```json
+{
+  "existing_sources": [],
+  "discovery_job_id": "<uuid -- NOT the same id as the eventual real job, just a session handle>",
+  "parsed_entities": {
+    "locations": [{"value": "Germany", "type": "location", "confidence": 1.0,
+      "normalized_value": null, "aliases": null, "metadata": null, "languages": ["de"]}],
+    "topics": [{"value": "renewable energy", "type": "topic", "confidence": 1.0, ...}],
+    "entity_types": [], "persons": [], "organizations": [], "events": []
+  },
+  "context_report": "<prose summary of the resolved search>",
+  "suggestions": ["<3 example follow-up query strings>"],
+  "stats": {"existing_sources_found": 0, "entities_extracted": 2, "locations": 1, "topics": 1, "entity_types": 0},
+  "location": { ... the location object documented above (id/name/country/coordinates/bounding_box/...) ... },
+  "entity_changes": {"added": [{"type": "locations", "value": "Germany"}, ...], "removed": [], "modified": []},
+  "confidence": 0.9,
+  "reasoning": "<prose explaining how the query was interpreted>",
+  "query": "<the raw query string sent>",
+  "session_id": "<uuid -- THIS is the id to pass back on the next refine call>"
+}
+```
+**CRITICAL for scripting the refine/"Change Location"/"Add <place>" chat flow
+without the UI**: there is no separate "send a chat message" endpoint --
+every chat refinement (Change Location, Adjust Topics, Narrow Entity Types,
+"Add <place>", Other) is just ANOTHER call to this SAME
+`/api/orchestrator/search/unified` endpoint, with three extra fields added
+to carry the conversation state forward:
+```json
+{
+  "query": "I want to change the location to Brussels, Belgium",
+  "limit": 20, "max_new_sources": 100, "include_suggestions": true,
+  "prior_query": "<the previous turn's query string>",
+  "prior_entities": { ...the previous turn's parsed_entities object, verbatim... },
+  "prior_context": "<the previous turn's context_report string, verbatim>",
+  "session_id": "<the previous turn's response's session_id, verbatim>"
+}
+```
+The response shape is identical to the first-turn response (same fields,
+including a fresh `location`/`parsed_entities`/`entity_changes` reflecting
+the delta: confirmed live, `entity_changes.added`/`removed` showed
+`[{"type":"locations","value":"Brussels, Belgium"}]` /
+`[{"type":"locations","value":"Luxembourg"}]` after a location-change
+refine). This means the entire pre-confirmation chat loop ("No, Revise
+Query" -> "Change Location"/"Adjust Topics"/etc. -> typed refine message)
+can be scripted purely by looping this one endpoint, carrying
+`session_id`/`prior_query`/`prior_entities`/`prior_context` forward each
+call -- no separate orchestrator chat/message endpoint exists for this
+phase (contrast with the per-feed Ubi chat in `ubiquity-ubi-chat`, which
+DOES have dedicated `chat/sessions`/`chat/sessions/<id>/messages`
+endpoints -- that is a different, later-stage chat system from this
+discovery-time query parser).
 
 ## Step 2: Ubi's confirmation chat turn
 After parsing, the UI shows a "Ubi" chat bubble summarizing what it found
@@ -362,7 +406,84 @@ three options:
   source URLs (plain text, one per line, max 25,000), a CSV upload, or a
   "Behavioral Dataset" upload. Has a "Skip AI validation" checkbox to add
   URLs without quality checks. Useful when you already know your sources
-  and don't want to wait on an agent.
+  and don't want to wait on an agent. **All three sub-flows CONFIRMED on
+  the wire** (captured against a disposable test pipeline, feed_id 1670):
+
+  **Plain Text / CSV Upload** (same endpoint, different payload shape):
+  ```
+  POST /api/locations/api/v1/feeds/<feed_id>/sources/upload
+  Content-Type: application/json
+  ```
+  Plain Text body (one URL per textarea line):
+  ```json
+  {"skip_validation": false, "location_uuid": "<pipeline's location_uuid>",
+   "urls": ["https://example.com/article"]}
+  ```
+  CSV Upload body (CSV is parsed/previewed CLIENT-SIDE first -- the UI
+  auto-detects a URL column in any layout, shows a live preview table
+  with a detected row/URL count before you confirm, and supports an
+  optional "Name" column per URL):
+  ```json
+  {"skip_validation": false, "location_uuid": "<...>",
+   "urls_with_metadata": [{"url": "https://example.com/a"}, {"url": "https://example.com/b"}]}
+  ```
+  (`urls_with_metadata` entries can presumably also carry a `name` field
+  from the CSV's Name column, though this wasn't independently exercised
+  with a populated Name column.) Both return `202` immediately:
+  ```json
+  {"job_id": "<uuid>", "feed_id": 1670, "url_count": 2, "valid_urls": 2,
+   "invalid_urls": 0, "status": "processing", "message": "Source URLs submitted for processing"}
+  ```
+  This is fire-and-forget (async) -- no confirmed polling endpoint for
+  `job_id`'s own progress was captured in this pass (the UI's own success
+  card just shows the submitted TOTAL/VALID/INVALID counts from the `202`
+  response and a "Done" button, it doesn't appear to poll further). The
+  "Download Template" link for CSV Upload is purely client-side (no
+  network call) -- it just generates and downloads a blank CSV skeleton
+  in-browser.
+
+  **Behavioral Dataset** -- a completely DIFFERENT endpoint family (not
+  `sources/upload`), multipart file upload plus a polling job:
+  ```
+  POST /api/orchestrator/workflows/dataset-upload/trigger
+  Content-Type: multipart/form-data
+  ```
+  Form fields confirmed present in the UI (`name` attributes read directly
+  off the live form): `dataset_title` (required, text), `dataset_behavior`
+  (optional, free-text tag, UI placeholder example `"consumer-spending"`),
+  `dataset_unit` (optional, e.g. `"Percent of 2019"`), `dataset_source_url`
+  (optional, `type=url`), `dataset_description` (optional, textarea),
+  `dataset_external_id` (optional, defaults to "auto-generated from
+  filename" per its placeholder) -- plus the file itself (`jsonl`/`csv`/
+  `xlsx`, max 25MB). Exact multipart field name the file is attached
+  under was not independently isolated (captured as an opaque `object`
+  reqBody by the fetch interceptor, which doesn't serialize FormData
+  readably) -- if scripting this outside the browser, inspect a raw HTTP
+  capture (e.g. mitmproxy) rather than relying on this skill's
+  interceptor pattern for the exact multipart part names.
+
+  `200 OK` response is a job object, then poll:
+  ```
+  GET /api/orchestrator/workflows/dataset-upload/<job_id>/status
+  ```
+  Confirmed job lifecycle (real example, a 2-row test CSV with `date,value`
+  columns): `status` goes `"pending"` (`progress: 0.0`) -> `"running"`
+  (`progress: 0.5`) -> `"completed"` (`progress: 1.0`, within ~3 seconds
+  for a trivial file) with the final object populated:
+  ```json
+  {"job_id": "<uuid>", "status": "completed", "progress": 1.0,
+   "dataset_id": "<uuid>", "series_names": ["value"], "observations_stored": 2,
+   "skipped_rows": 0, "warnings": [], "error": null,
+   "created_at": "...", "updated_at": "...", "completed_at": "..."}
+  ```
+  `series_names` is derived from the file's non-date column header(s) --
+  this confirms Behavioral Dataset upload is building a genuine time-series
+  dataset (one or more named series over dates), not just importing raw
+  rows -- consistent with the "Behavioral Datasets" / dataset-hunting
+  concept documented in `ubiquity-agent-settings`/`ubiquity-pipeline-creation`'s
+  Agent Settings section. `observations_stored` / `skipped_rows` give row-
+  level ingestion accounting; `warnings` surfaces soft parse issues without
+  failing the whole job.
 
 ## Step 3: pipeline + feed creation, discovery job launch
 Choosing "Yes, Discover Sources" triggers, in order:
@@ -445,8 +566,16 @@ jobs only (not the one already running). Fields:
     `mixed` (English + native) | `english` (English only). Use `native` for
     non-English-dominant locations (China, Russia, etc.) to actually surface
     local sources.
-  - Custom Instructions: free-text extra requirements for query generation
-    (field present in UI; exact JSON key not yet confirmed on the wire).
+  - Custom Instructions: free-text extra requirements for query generation --
+    CONFIRMED JSON key: `agent_config.search_generation.custom_instructions`
+    (string). Seen live on a real pipeline:
+    `"Prioritize individual resident voices and personal reactions: Reddit
+    threads, local Facebook/Nextdoor community groups, personal social media
+    posts (Instagram/TikTok/X), neighborhood forums, and community board
+    discussions. Deprioritize and avoid corporate/commercial entities such as
+    pest control companies, exterminator businesses, and other for-profit
+    vendors -- focus on what everyday New Yorkers are personally saying, not
+    businesses selling related services."`
 - **Evaluation Agent** -> `agent_config.evaluation`: `quality_standards`
   (e.g. `moderate`), `local_focus_priority` (e.g. `medium`),
   `credibility_threshold` (float 0-1, e.g. 0.5), `topic_relevance_weight`
