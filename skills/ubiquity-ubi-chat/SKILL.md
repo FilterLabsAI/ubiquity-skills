@@ -43,36 +43,105 @@ range, topic) the same way the discovery-time query parser does. Don't
 assume the chat only answers from the whole-feed default scope unless the
 first message was topic/platform-neutral.
 
-## Starting a new chat / sending a message -- CONFIRMED on the wire
-The UI's **"New Chat" button is purely a client-side state reset -- it
-fires NO network call.** It just clears the active conversation to the
-empty state (shown with three canned starter prompts):
-- "Summarize the recent artifacts from my feed, highlighting key themes and
-  important findings."
-- "List the main themes and topics that appear in the recent artifacts."
-- "Analyze and evaluate the overall tone and sentiment of the recent
-  artifacts."
+## PREFER THE RAW API OVER THE BROWSER -- CONFIRMED, big practical win
+Everything in this skill can be driven with plain `curl`/`requests` against
+`https://ubiquity.filterlabs.ai/api/understand/chat/...` using a Bearer
+token from `ubiquity-auth` -- **do not drive the SPA with `browser_exec` for
+chat unless the user specifically wants to watch it happen in a live
+browser.** Confirmed problems with the browser path that the API path
+avoids entirely:
+- The React-controlled textarea's keystroke simulation (`fill_input`) can
+  hang on `Input.dispatchKeyEvent` and crash the tab to `about:blank`,
+  forcing a full SPA re-bootstrap (re-set `access_token` in localStorage,
+  reload, re-navigate to the session).
+- The tab can independently drop to `about:blank` between calls (observed
+  mid-session with no apparent trigger), losing `localStorage` access
+  (`SecurityError: Failed to read the 'localStorage' property`) and
+  requiring the same re-bootstrap.
+- The UI showed a one-off `"Sorry, I encountered an error processing your
+  request"` on a real attempt. **Correction from initial write-up:** this
+  was NOT confirmed as a real backend failure -- the immediate `GET
+  .../messages` check that showed no new assistant row is also exactly
+  what you'd see while the request is still genuinely in flight, since
+  (per below) the send call is synchronous and a complex/feed-wide
+  question can take **minutes**, not seconds, to resolve. The likelier
+  explanation is the UI's own request simply timed out client-side while
+  the backend was still working -- not that nothing was persisted. Don't
+  treat a single quick before/after GET as proof of non-persistence; a
+  slow synchronous call in progress looks identical from that one check.
+- Because the send call is synchronous (see below), there is nothing to
+  poll for on a fresh send -- you wait for the ONE call to return, which
+  can legitimately take minutes on a complex/feed-wide question. Polling
+  `GET .../messages` while that call is still outstanding will not show
+  the reply early; it only shows history already committed by prior
+  (completed) calls.
 
-A session is only created **lazily, server-side, on the first actual
-message**. Confirmed sequence when you type a message and hit send:
-```
-POST /api/understand/chat/sessions                 # creates the session (feed_id, derived filter_state, title)
-POST /api/understand/chat/sessions/<new_session_id>/messages   # sends your message, gets Ubi's reply
-```
-The new session then shows up in a subsequent
-`GET /api/understand/chat/sessions?...` list call (confirmed: appeared with
-auto-derived `filter_state.siteTypes` and a truncated `title` immediately
-after sending).
+**Direct API is also a bigger behavioral finding than just "use curl":
+the message-send call is SYNCHRONOUS and returns the full assistant reply
+inline** -- no polling of `GET .../messages` needed at all for a fresh
+send. One confirmed round trip, end to end:
+```bash
+# 1. Create a session (or reuse an existing session_id from the list endpoint)
+curl -s -X POST "https://ubiquity.filterlabs.ai/api/understand/chat/sessions" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"feed_id": 1668}'
+# -> {"id": "<session_uuid>", "feed_id": 1668, "title": "New Chat", "filter_state": null, ...}
 
-**Driving this with `browser_exec`:** the textarea
-(`placeholder="Ask follow-up questions or request new analysis..."` once a
-session has started, or the same input in the empty state) is a
+# 2. Send the message -- the ONLY required field is "message" (confirmed via a
+#    422 on an empty body: {"detail":[{"loc":["body","message"],"msg":"Field required"}]})
+curl -s -X POST "https://ubiquity.filterlabs.ai/api/understand/chat/sessions/<session_id>/messages" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"message": "your question text"}'
+```
+Confirmed response shape -- the reply is RIGHT THERE, no follow-up GET needed:
+```json
+{
+  "user_message": {"id": "...", "session_id": "...", "role": "user", "content": "your question text", "created_at": "..."},
+  "assistant_message": {"id": "...", "role": "assistant", "content": "<markdown reply>", "reasoning_summary": "...", "citations": null, "chart": null, "created_at": "..."},
+  "citations": [],
+  "artifacts_count": 0,
+  "chart": null,
+  "filter_update": {"dateRange": null, "siteTypes": null, "topics": null, "entities": null, "textSearch": null, "reason": null}
+}
+```
+Latency: confirmed ~3-4s for a trivial question (consistent with the
+messages-history endpoint's `citations`/`chart` fields being null/empty on
+the same kind of question). **Important, from direct user correction
+during review -- not yet independently re-verified via a timed curl call:**
+a complex/feed-wide thematic question is synchronous end-to-end and can
+take several MINUTES to return, not just the "~15-25s plain, ~40s+ chart"
+figures seen in UI observation elsewhere in this skill (those UI figures
+may reflect a different/shorter question shape, or the UI's own
+client-side request timeout cutting the wait short rather than the true
+backend completion time). **Set your HTTP client timeout generously --
+several minutes, not 90s -- for any non-trivial question**, and don't
+mistake a still-in-flight request for a failure.
+
+`filter_update` is new, not previously documented here -- it's presumably
+how the session's `filter_state` gets updated turn-by-turn as the
+conversation's scoping evolves (parallel to the first-message-only
+derivation described below), but only confirmed as present-and-null on a
+neutral trivial question; not yet confirmed populated on a scoping
+question (e.g. "only Twitter sources").
+
+**Cleanup confirmed:** `DELETE /api/understand/chat/sessions/<session_id>`
+returns `{"status": "deleted", "session_id": "..."}` on `200` -- useful for
+removing throwaway/test sessions created while probing the API, so they
+don't clutter the real conversation list for the user.
+
+**When you DO still want the browser** (e.g. the user wants to watch Ubi
+respond live, or you're exploring UI-only behavior not yet wrapped by the
+API): the UI's **"New Chat" button is purely a client-side state reset --
+it fires NO network call**, just clears to the empty state (three canned
+starter prompts: "Summarize the recent artifacts...", "List the main
+themes...", "Analyze and evaluate the overall tone..."). A session is only
+created server-side on the first actual message, via the same two calls
+above. The textarea
+(`placeholder="Ask follow-up questions or request new analysis..."`) is a
 React-controlled input -- plain `fill_input` keystroke simulation can hang/
-timeout on it under load (observed: `Input.dispatchKeyEvent` timing out
-mid-type and leaving the tab on `about:blank`, requiring a full SPA
-re-bootstrap per `ubiquity-auth`'s localStorage trick). **Prefer setting
-`.value` via the native setter + dispatching an `input` event**, which
-React picks up reliably without the keystroke round-trip:
+timeout on it (`Input.dispatchKeyEvent`) and crash the tab to `about:blank`.
+**Prefer setting `.value` via the native setter + dispatching an `input`
+event**, which React picks up reliably without the keystroke round-trip:
 ```js
 const ta = document.querySelector('textarea[placeholder="Ask follow-up questions or request new analysis..."]');
 const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
@@ -80,6 +149,10 @@ setter.call(ta, "your question text");
 ta.dispatchEvent(new Event('input', { bubbles: true }));
 // then click the single (icon-only, unlabeled) <button> in the same form/container as the textarea
 ```
+Even then, still expect the tab to occasionally drop to `about:blank`
+between calls and need the `ubiquity-auth` localStorage re-bootstrap --
+this is why the direct-API path above is strongly preferred for anything
+scripted/unattended.
 
 ## Reading messages / replaying history -- CONFIRMED on the wire
 ```
@@ -229,8 +302,17 @@ field is reliably inferred the same way -- notes per field:
   for Ubi being able to reason over metric data in chat.
 
 ## Practical notes
-- Chat responses take a few seconds (observed ~15-25s for a feed-wide
-  question over hundreds of sources) -- poll
+- **If sending via the direct API** (preferred, see above): the
+  `POST .../messages` call is synchronous and already returns the
+  assistant's reply in its own response -- no polling needed, but it can
+  take SEVERAL MINUTES to return on a complex/feed-wide question (per a
+  direct correction from the user: a UI-level timeout can look like a
+  backend failure/empty persistence when the request is actually just
+  still running). Set the HTTP client timeout accordingly (minutes, not
+  seconds) rather than treating a long wait as an error.
+- **If driving the SPA UI directly** instead (e.g. user wants to watch
+  live): responses still take a few seconds to render (observed ~15-25s
+  for a feed-wide question over hundreds of sources) -- poll
   `GET .../messages?...` after sending rather than assuming an instant
   reply; the UI itself shows a "Thinking Process" state while waiting.
 - Ubi cites real per-artifact URLs with relevance scores, and its answers
