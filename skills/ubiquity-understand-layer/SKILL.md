@@ -361,8 +361,13 @@ for a in artifacts[:page_size]:
 ```
 **Expect and handle gracefully, these are normal/observed, not bugs:**
 - `metric_score` is `None` for many rows even within the metric's own
-  scoped date window -- the metric generator hasn't scored every artifact
-  yet (scoring lags ingestion). Render as `N/A`, don't treat as an error.
+  scoped date window. Per `ubiquity-metric-generators`: a metric only
+  scores artifacts ingested AFTER the metric was created -- it does NOT
+  backfill/retroactively score artifacts that already existed at creation
+  time, so `None` on a pre-existing artifact is permanent, not transient
+  lag that will resolve itself. Only artifacts ingested going forward
+  (post metric-creation) will accumulate scores. Render as `N/A` either
+  way, but don't tell a user it'll "catch up soon" for old artifacts.
 - `headline` or `content_sample` can be empty strings on some artifacts
   (seen on `article_list`-type sources with no headline parsed, or
   micro_blog posts with no body text extracted) -- render as a fallback

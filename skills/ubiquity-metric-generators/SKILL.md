@@ -172,6 +172,27 @@ compare `metrics/preview` `total_count`/`data` on the SAME feed/date
 range/prompt-scoring-logic, and ideally repeat to rule out noise, before
 upgrading this section back to CONFIRMED.
 
+## IMPORTANT: metrics only score NEW data going forward, not historical backlog
+Per direct user clarification: a newly-created metric generator does **not**
+retroactively score a feed's existing/already-ingested artifacts -- it only
+scores artifacts ingested AFTER the metric was created (i.e. new incoming
+data going forward). This explains an observation that looked at first like
+ordinary "scoring lag": on a feed with 1000+ already-ingested artifacts,
+creating 4 new metrics the same day left `metrics/preview` showing only a
+handful of scored artifacts (e.g. 5 for `sentiment`) hours later -- not
+because the scoring job was slowly working through a backlog that would
+eventually catch up, but because the pre-existing 1000+ artifacts are
+simply never going to be scored by a metric created after they were
+ingested. **Don't tell a user "scoring just needs more time to catch up"
+for artifacts that predate the metric -- it won't.** Only newly-arriving
+artifacts (from ongoing discovery/refresh) will accumulate scores for a
+given metric; expect a real, useful timeline to build up gradually as new
+data comes in post-metric-creation, not by backfilling the past.
+(Not independently re-verified by this skill via a wait-and-recheck test
+showing the scored count plateau rather than grow -- recorded per the
+user's direct correction, flag for re-confirmation if a future session can
+observe the count over a longer window.)
+
 ## Viewing metric output
 There is no separate per-metric "results" GET -- computed metric values
 are read via the Understand-layer endpoints that join scores to
