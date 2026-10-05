@@ -78,6 +78,41 @@ re-sends `name` alongside the interval, do the same (read the feed first
 via `GET /api/locations/api/v1/feeds/<feed_id>` to get the current `name`,
 then PUT both fields) rather than guessing at partial-update semantics.
 
+## Recommended: propose metrics as soon as Ubi is enabled
+As soon as a feed's Understand/Ubi layer is turned on (refresh interval
+set to anything other than "Do Not Update"), think about metrics right
+away -- don't wait for the user to ask for "numbers" later. Qualitative
+Ubi-chat answers alone (prose summaries, hand-picked quotes) don't give a
+real distribution across all ingested artifacts; metrics do, and scoring
+lags ingestion, so the earlier metrics exist the sooner they have real
+coverage.
+
+Look back at the user's ORIGINAL question/goal for this feed and derive
+metric suggestions FROM IT, rather than defaulting to a fixed bundle --
+what's useful varies a lot by topic. A sentiment-tracking question
+usually wants a Sentiment metric; a question specifically about opinion
+of a policy/entity wants a topic-scoped Stance metric (write it
+concretely, e.g. "Stance toward NYC's rat mitigation efforts", not the
+generic `[ENTITY]` placeholder -- this disambiguates tone from opinion,
+since a snarky-but-supportive post can read sentiment-negative while
+being stance-positive); a question comparing groups (residents vs. news,
+competitors, regions) wants a classifier metric for that split; a
+question covering multiple distinct programs/angles wants a sub-topic
+classifier so scores can be broken down per angle instead of only in
+aggregate. Propose 1-4 metrics as fits the actual question, not a fixed
+count.
+
+**Confirm each proposed metric with the user before creating it** (e.g.
+via `clarify`, one metric per choice or a short list to approve/edit) --
+don't create metrics speculatively. Still propose them unprompted/early
+rather than waiting to be asked, but creation itself needs user
+confirmation, since metric design (exact scale, prompt wording, which
+split to classify by) is a judgment call worth a quick check rather than
+a default to just run with. Still worth doing this early even though
+scoring takes time to catch up with ingestion (see `metric_score is None
+for many rows` under Pitfalls above) -- getting them created early
+minimizes that lag window by the time anyone wants to review results.
+
 ## Artifacts (what Ubi analyzes)
 ```
 GET /api/understand/artifacts/count/<feed_id>   -> {count, feed_id}
