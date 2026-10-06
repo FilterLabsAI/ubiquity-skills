@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.3.0",
-    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save. v1.3.0: corrected the chat-sessions messages POST -- required field is 'message' not 'content', confirmed the call is SYNCHRONOUS (reply returned inline, no polling needed on a fresh send), documented the full confirmed response shape including filter_update, and added the confirmed DELETE .../sessions/{id} cleanup endpoint; this is now the preferred way to drive Ubi chat over browser_exec on the SPA (see ubiquity-ubi-chat)."
+    "version": "1.4.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save. v1.3.0: corrected the chat-sessions messages POST -- required field is 'message' not 'content', confirmed the call is SYNCHRONOUS (reply returned inline, no polling needed on a fresh send), documented the full confirmed response shape including filter_update, and added the confirmed DELETE .../sessions/{id} cleanup endpoint; this is now the preferred way to drive Ubi chat over browser_exec on the SPA (see ubiquity-ubi-chat). v1.4.0: captured the real pipeline-creation request bodies via an XHR interceptor on the live SPA (previously unconfirmed/guessed and wrongly thought to require the browser) -- added saved-searches POST and feeds POST as the two calls that must precede pipelines POST, filled in the pipelines POST's actual request body, and confirmed launching a discovery job (pipelines PATCH + jobs/create) is a SEPARATE, OPTIONAL step -- the UI's 'Save' button stops after pipeline creation and never fires either call, verified by comparing captured requests, the resulting pipeline's empty metadata, and the account-wide jobs list. Also corrected artifacts/count/{feed_id}: the per-feed-count bug is FIXED server-side as of 2026-10-06 (re-verified live across 5 feeds with distinct, accurate counts) -- it is no longer unreliable and is now the preferred fast ingestion-progress check over artifacts/preview's total_count."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
@@ -60,15 +60,24 @@
         "responses": {"200": {"description": "array of pipeline objects"}}
       },
       "post": {
-        "summary": "Create a pipeline (fires after 'Yes, Discover Sources')",
-        "responses": {"200": {"description": "pipeline object: id, feed_id, session_id, metadata.discovery_config, metadata.agent_config, search_filters"}}
+        "summary": "Step 3 of pipeline creation (CONFIRMED via XHR capture off the live SPA, previously unconfirmed/guessed): links an already-existing saved_search_id + feed_id into a new pipeline. MUST be preceded by saved-searches POST and feeds POST (calling this alone, with no feed yet, 400s with {error: 'Feed not found'}). Fired by BOTH the 'Yes, Discover Sources' button AND the plain 'Save' button -- pipeline creation does not imply discovery launch, see pipelines/{pipeline_id} PATCH + jobs/create below for the separate, optional discovery-launch step.",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "name": {"type": "string"},
+          "saved_search_id": {"type": "string", "description": "id from the preceding saved-searches POST"},
+          "feed_id": {"type": "integer", "description": "id from the preceding feeds POST"},
+          "auto_sync_enabled": {"type": "boolean", "default": true},
+          "sync_on_job_completion": {"type": "boolean", "default": true},
+          "sync_on_map_change": {"type": "boolean", "default": false},
+          "session_id": {"type": "string", "description": "session_id from the originating /search/unified response"}
+        }}}}},
+        "responses": {"201": {"description": "pipeline object: id, feed_id, saved_search_id, session_id, auto_sync_enabled, sync_on_job_completion, sync_on_map_change, metadata (empty {} until the discovery_config PATCH below), created_at, updated_at"}}
       }
     },
     "/locations/v1/pipelines/{pipeline_id}": {
       "get": {"summary": "Get a pipeline (feed_id, agent_config, discovery_config, search_filters)", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "pipeline object"}}},
       "put": {"summary": "Full update, e.g. rename", "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated pipeline"}}},
       "patch": {
-        "summary": "Update metadata.agent_config / discovery_config -- THIS is the Agent Settings 'Save Settings' endpoint (see ubiquity-agent-settings), re-confirmed live off a real Save Settings click. Whole metadata object must be re-sent, not a partial diff. Quick Presets (Balanced/Social Media Boost/News Focus/Behavioral Datasets Boost) are CONFIRMED pure client-side form state -- clicking one fires zero network calls; nothing persists until this PATCH actually fires via Save Settings (or is called directly).",
+        "summary": "Update metadata.agent_config / discovery_config -- THIS is the Agent Settings 'Save Settings' endpoint (see ubiquity-agent-settings), re-confirmed live off a real Save Settings click. Also used as step 3d of the discovery-launch sequence (sets discovery_config defaults right before jobs/create) -- CONFIRMED this step is OPTIONAL, not part of plain pipeline creation: clicking the Discover tab's 'Save' button (vs. 'Yes, Discover Sources') never fires this PATCH at all, leaving metadata as {}. Whole metadata object must be re-sent, not a partial diff. Quick Presets (Balanced/Social Media Boost/News Focus/Behavioral Datasets Boost) are CONFIRMED pure client-side form state -- clicking one fires zero network calls; nothing persists until this PATCH actually fires via Save Settings (or is called directly).",
         "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "metadata": {"type": "object", "properties": {
@@ -222,7 +231,7 @@
     },
     "/orchestrator/api/v1/jobs/create": {
       "post": {
-        "summary": "Launch a discovery/curation job (ONLY call that actually starts agentic work -- see ubiquity-discovery-jobs for the never-stack-jobs rule)",
+        "summary": "Launch a discovery job -- the ONLY call that actually starts agentic work (see ubiquity-discovery-jobs for the never-stack-jobs rule). CONFIRMED OPTIONAL relative to pipeline creation: the Discover tab's 'Save' button creates the pipeline (saved-searches+feeds+pipelines POSTs) WITHOUT ever calling this -- verified by XHR capture showing it absent, the pipeline's metadata staying {}, and no matching entry in the account-wide jobs list. The request sends job_type:'discovery' but GET on the resulting job echoes job_type:'curation' -- both values are real, just at different points in the request/response cycle (the orchestrator relabels internally).",
         "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
           "location_uuid": {"type": "string"},
           "job_type": {"type": "string", "example": "discovery"},
@@ -266,6 +275,19 @@
     },
     "/orchestrator/jobs/{job_id}/async-status": {
       "get": {"summary": "Async sub-task progress for a job", "parameters": [{"name": "job_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{job_id, pending_count, processed_count, failed_count, total_count, all_complete, has_async_work, snapshots}"}}}
+    },
+    "/locations/api/v1/feeds": {
+      "post": {
+        "summary": "Step 2 of pipeline creation (CONFIRMED via XHR capture off the live SPA): creates the feed resource. This is a SEPARATE prior call, not something the pipelines POST does itself -- root cause of the earlier 'Feed not found' 400 when pipelines POST was tried alone with a guessed body.",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "name": {"type": "string"},
+          "metadata": {"type": "object", "properties": {
+            "description": {"type": "string", "example": "Feed for search: <query text>"},
+            "search_query": {"type": "string"}
+          }}
+        }}}}},
+        "responses": {"201": {"description": "feed object: id (numeric, this is feed_id for the pipelines POST), uuid, name, refresh_interval{Microseconds,Days,Months,Valid=false until set}, metadata (base64), keycloak_user_id, created_at, updated_at"}}
+      }
     },
     "/locations/api/v1/feeds/{feed_id}": {
       "get": {"summary": "Get feed (refresh_interval as human string, e.g. '12 hours')", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "feed object"}}},
@@ -351,7 +373,7 @@
       }
     },
     "/understand/artifacts/count/{feed_id}": {
-      "get": {"summary": "Count ingested artifacts for a feed. CONFIRMED UNRELIABLE -- observed returning the identical value for multiple different feeds including one with zero real content. Use artifacts/preview's total_count instead.", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "{count, feed_id} -- do not trust as per-feed"}}}
+      "get": {"summary": "Count ingested artifacts for a feed. Was previously CONFIRMED BROKEN (returned the same stale value for every feed) -- FIXED server-side as of 2026-10-06 (exact Qdrant match on string feed_id) and re-verified live across 5 feeds with distinct, accurate counts, including an exact match against artifacts/preview's total_count for a feed under the 1000-item cap. Now the preferred fast/cheap ingestion-progress check, preferred over fetching full records via artifacts/preview just to read its total_count.", "parameters": [{"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}}], "responses": {"200": {"description": "{count, feed_id}"}}}
     },
     "/understand/artifacts/preview": {
       "post": {
@@ -414,6 +436,20 @@
     },
     "/locations/v1/locations/{location_uuid}": {
       "get": {"summary": "Get a (possibly synthesized COMBINED-) location object", "parameters": [{"name": "location_uuid", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{id, name, abbreviation, country, coordinates, bounding_box}"}}}
+    },
+    "/locations/api/v1/saved-searches": {
+      "post": {
+        "summary": "Step 1 of pipeline creation (CONFIRMED via XHR capture off the live SPA): persists the parsed query + filters as a saved search. Must happen BEFORE the feeds POST and pipelines POST below -- both reference this call's returned id.",
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {
+          "name": {"type": "string", "description": "query text, used as the default pipeline name"},
+          "search_query": {"type": "string", "description": "same query text"},
+          "search_filters": {"type": "object", "properties": {
+            "entities": {"type": "array", "items": {"type": "object"}, "description": "flattened parsed_entities.locations + .topics + .entity_types from the preceding /search/unified response, each entry's value/type/confidence/normalized_value/aliases/metadata/languages kept verbatim"},
+            "location_uuid": {"type": "string", "description": "location.id from /search/unified"}
+          }}
+        }}}}},
+        "responses": {"201": {"description": "saved-search object: id (this is saved_search_id for the pipelines POST), name, search_query, search_filters, is_default, created_at, updated_at"}}
+      }
     },
     "/locations/api/v1/saved-searches/{saved_search_id}": {
       "put": {"summary": "Re-save the pipeline's saved search_query/search_filters (fired as part of the coverage-level launch sequence)", "parameters": [{"name": "saved_search_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated saved-search object"}}}
