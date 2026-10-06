@@ -153,34 +153,48 @@ POST /api/understand/artifacts/preview
   # filter_state can include a date range, e.g.:
   {"feed_id": <feed_id>, "filter_state": {"dateRange": {"start": "2026-09-01", "end": "2026-10-03"}}, "limit": 1000}
 ```
-**CONFIRMED BUG -- `artifacts/count/<feed_id>` is not reliable, do not use
-it to check ingestion progress.** Observed live: calling it for several
-DIFFERENT feeds on the same account (an established feed with real
-ingested content, and a feed created minutes earlier with zero actual
-content yet) returned the EXACT SAME `count` value (~27,431) for every
-one of them. This is not a per-feed count -- it looks like a stale/cached
-or account-wide value, not something scoped to the `feed_id` in the
-request. A feed can show `count: 27431` here while `artifacts/preview`
-genuinely returns `total_count: 0` and an empty `artifacts` list for that
-same feed -- i.e. the count endpoint will actively lie about a brand-new
-feed having tens of thousands of documents when it has none.
-**Always use `artifacts/preview`'s own `total_count` field (or
-`len(artifacts)`) as the source of truth for "has this feed ingested
-anything yet," never `artifacts/count`.** A quick zero-cost check:
+**`artifacts/count/<feed_id>` was previously broken (returned the same
+account-wide stale value for every feed) -- this has been fixed
+server-side as of 2026-10-06 and re-verified live.** The underlying bug
+was `feed_id` being matched as a non-`exact` filter against a field
+that's actually stored as a string in the vector DB; the fix switches the
+Qdrant filter to `exact=True` with the feed_id coerced to a string (see
+`agents/understand-agent/api/main.py`, commit `79449109`). Live
+re-verification against 5 real feeds now shows distinct, plausible
+per-feed counts instead of one identical account-wide number, and for a
+feed under the 1000-item `artifacts/preview` cap (640 artifacts) the two
+endpoints' counts matched exactly:
 ```
-POST /api/understand/artifacts/preview
-{"feed_id": <feed_id>, "filter_state": {}, "limit": 1000}
+feed 1662: artifacts/count -> 640   | artifacts/preview total_count -> 640  (exact match, under cap)
+feed 1663: artifacts/count -> 95889 | artifacts/preview total_count -> 1000 (capped, consistent: real count > cap)
+feed 1665: artifacts/count -> 14191 | artifacts/preview total_count -> 1000 (capped, consistent)
+feed 1668: artifacts/count -> 22959 | artifacts/preview total_count -> 1000 (capped, consistent)
+feed 1670: artifacts/count ->  3075 | artifacts/preview total_count -> 1000 (capped, consistent)
 ```
-`total_count: 0` (empty `artifacts: []`) means nothing has been indexed
-into the queryable collection yet, regardless of what `artifacts/count`
-claims -- poll this endpoint (every 1-2 minutes is plenty; it's a fast
-call, unlike `metrics/preview`) rather than the count endpoint when
-waiting for a freshly-created or freshly-refreshed feed to finish
-ingesting. This was reproduced consistently, not a one-off glitch -- treat
-`artifacts/count` as currently non-functional for this purpose until
-FilterLabs fixes it server-side, and prefer `artifacts/preview` for any
-other use (progress UI, "is this feed ready for Ubi chat/metrics yet"
-checks) too.
+**`artifacts/count` is now the preferred, fast way to check whether a
+feed has ingested anything yet / to poll ingestion progress** -- it's a
+direct Qdrant count, cheaper than fetching and counting up to 1000 full
+artifact records via `artifacts/preview`. Use it as:
+```
+GET /api/understand/artifacts/count/<feed_id>   -> {"count": N, "feed_id": N}
+```
+`count: 0` means nothing has been indexed yet; any positive count means
+ingestion has produced at least that many artifacts. `artifacts/preview`
+remains the right choice when you actually need the artifact records
+themselves (for the data browser table, Sample Distribution chart, etc.)
+-- `total_count` there is capped at 1000 regardless of the real
+underlying count, so don't use `artifacts/preview`'s `total_count` as an
+exhaustive count once a feed has grown past the cap; `artifacts/count`
+is the uncapped, exact figure.
+
+This was verified with one before/after-style live comparison across 5
+feeds plus one exact-match check under the cap -- solid evidence the fix
+works as described, but not an exhaustive regression suite (e.g. a true
+zero-artifact brand-new feed wasn't available to test against during
+this verification pass). If `artifacts/count` is ever again observed
+returning an identical value across clearly-different feeds, treat that
+as a regression and fall back to `artifacts/preview`'s `total_count`
+until re-confirmed.
 
 **`artifacts/preview` defaults to capping results at 1000** (the `limit`
 param) -- it does NOT try to return everything matching the filter.

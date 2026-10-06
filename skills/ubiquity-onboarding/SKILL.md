@@ -68,7 +68,15 @@ endpoint exercised across the `ubiquity-*` skill family) and
    where raw discovered sources start actually being scanned/ingested
    into analyzable "artifacts" (articles/posts/content). Set how often
    the feed re-syncs (Do Not Update / 12h / Daily / Weekly / etc -- a
-   single auto-saving dropdown). See `ubiquity-understand-layer`.
+   single auto-saving dropdown). See `ubiquity-understand-layer`. To
+   check whether artifacts have actually started arriving yet (vs. still
+   "Collecting data..."), poll `GET /api/understand/artifacts/count/
+   <feed_id>` -- this was broken (returned the same stale account-wide
+   number for every feed) until a 2026-10-06 server-side fix; it's now
+   confirmed accurate and is the cheap/fast way to check ingestion
+   progress, preferred over fetching full records via `artifacts/preview`
+   just to read its `total_count`.
+
 7. **Add metrics.** Create custom scored metrics (Sentiment, Stance
    toward an entity, free-text Entity extraction, or a fully custom
    prompt) that run against every ingested artifact, producing a time
