@@ -11,15 +11,64 @@ and pushed to the team's GitHub mirror repo:
 **https://github.com/FilterLabsAI/ubiquity-skills** (private), local
 clone at `~/filterlabs/ubiquity-skills`.
 
-**Never run step 2 (the git workflow) without first running step 1 (the
-leak scanner) AND step 1.5 (the logical-soundness review) on every file
-that will be committed.** This repo and these skills are developed
+**Never start editing/improving a `ubiquity-*` skill without first
+running step 0 (sync the repo + local branch with `main`), and never run
+step 2 (the git workflow) without first running step 1 (the leak
+scanner) AND step 1.5 (the logical-soundness review) on every file that
+will be committed.** This repo and these skills are developed
 against a real production account
 (see redacted as `<ACCOUNT_EMAIL>` in examples below) against real
 pipelines, feeds, entities, and jobs -- it is very easy for a real UUID,
 email, token, or internal hostname to end up pasted into a SKILL.md
 "confirmed via wire capture" note during development. Treat every commit
 as a potential leak vector.
+
+## Step 0: sync repo + local with `main` before touching anything
+Before improving/editing ANY `ubiquity-*` skill content (not just before
+the final commit in Step 2), make sure both the local git clone
+(`~/filterlabs/ubiquity-skills`) and its working branch are caught up
+with `origin/main`. Skills get edited live in the Hermes skills
+directory via `skill_manage`, but the git clone is the source of truth
+for "what does main actually look like right now" -- editing against a
+stale clone risks silently redoing work already merged, or missing a
+teammate's change to the same file.
+
+```
+cd ~/filterlabs/ubiquity-skills
+git fetch origin
+git status            # must be clean before pulling/merging -- if dirty, stop and ask the user what to do with the local changes first
+```
+
+Then branch on what you find:
+- **On `main`:** `git pull --ff-only`. If this fails (local main has
+  diverged, e.g. someone committed directly), stop and show the user
+  `git log --oneline main..origin/main` / `origin/main..main` and ask
+  how to reconcile -- do not force-push or force-reset without explicit
+  instruction.
+- **On an existing feature/ongoing-project branch:** assume it may be
+  behind `main` and needs to be caught up before you add more changes.
+  Ask the user whether they want `merge` or `rebase` (default to
+  `merge` -- safer for a shared/pushed branch, doesn't rewrite commits
+  already pushed to `origin`):
+  ```
+  git merge origin/main        # or: git rebase origin/main
+  ```
+  - **If this reports conflicts:** STOP. Do not resolve them yourself.
+    List the conflicted files (`git status`) and hand it to the user to
+    resolve interactively in their own editor/terminal -- conflict
+    resolution requires judgment about intent that you don't have
+    visibility into. Wait for them to confirm the merge/rebase is
+    complete (`git status` clean, no `U` entries) before continuing.
+  - **If it's clean:** report what came in from `main` (e.g.
+    `git log --oneline HEAD@{1}..HEAD`) so the user knows what they're
+    now building on top of.
+- **Starting a brand-new branch for this session's work:** just ensure
+  `main` itself is up to date first (per the "On `main`" bullet above),
+  then branch from it as usual in Step 2.
+
+Only once the clone and current branch are confirmed in sync with
+`origin/main` (or the user has explicitly resolved/accepted any
+divergence) should you proceed to actually edit skill content.
 
 ## Step 1: scan for leaks
 Run the scanner against every file you're about to commit:
