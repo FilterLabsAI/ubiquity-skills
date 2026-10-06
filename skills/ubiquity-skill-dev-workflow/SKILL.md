@@ -8,8 +8,15 @@ description: Use before committing ubiquity-* skill changes to GitHub.
 This skill governs how changes made to any `ubiquity-*` skill (or its
 supporting scripts/scratch artifacts intended for commit) get reviewed
 and pushed to the team's GitHub mirror repo:
-**https://github.com/FilterLabsAI/ubiquity-skills** (private), local
-clone at `~/filterlabs/ubiquity-skills`.
+**https://github.com/FilterLabsAI/ubiquity-skills** (private).
+
+**The local clone's path is NOT hardcoded** -- it's resolved once per
+machine via `scripts/repo_location.py` (see "Step -1" below) so the
+clone can live anywhere the user wants and can be moved later without
+editing this skill. Everywhere this doc says `<REPO>` below, that means
+"the path `scripts/repo_location.py --get` prints" -- resolve it fresh
+at the start of a session rather than assuming a remembered value is
+still correct, since the user can move the clone between sessions.
 
 **Never start editing/improving a `ubiquity-*` skill without first
 running step 0 (sync the repo + local branch with `main`), and never run
@@ -23,10 +30,41 @@ email, token, or internal hostname to end up pasted into a SKILL.md
 "confirmed via wire capture" note during development. Treat every commit
 as a potential leak vector.
 
+## Step -1: resolve where the repo clone actually lives
+Before anything else (including Step 0), find `<REPO>` -- the local
+path to the ubiquity-skills clone -- with:
+```
+python3 scripts/repo_location.py --get
+```
+This prints the configured path and exits 0 only if that path still
+exists, is a git repo, and its `origin` remote actually points at
+`FilterLabsAI/ubiquity-skills` (catches a stale config left over from a
+moved/deleted/renamed clone). If it exits 1 (nothing configured yet, or
+the configured path no longer checks out), ask the user via `clarify`
+for the absolute path to their clone:
+- If they already have one, save it:
+  ```
+  python3 scripts/repo_location.py --set /absolute/path/to/their/clone
+  ```
+  (also re-run `--set` any time the user says they've moved the repo --
+  there's no automatic move-detection, just re-pointing).
+- If they don't have one yet, offer to create it for them (ask where
+  they want it, default to something like `~/filterlabs/ubiquity-skills`
+  only as a suggestion, not an assumption):
+  ```
+  git clone git@github.com:FilterLabsAI/ubiquity-skills.git /chosen/path
+  python3 scripts/repo_location.py --set /chosen/path
+  ```
+`python3 scripts/repo_location.py --status` dumps the full diagnostic
+(configured path, each check, and why it failed) if `--get` is failing
+and it's unclear why. Use `<REPO>` as a stand-in for "whatever `--get`
+just printed" throughout the rest of this skill -- do not hardcode a
+path or remember one from an earlier session without re-resolving it.
+
 ## Step 0: sync repo + local with `main` before touching anything
 Before improving/editing ANY `ubiquity-*` skill content (not just before
-the final commit in Step 2), make sure both the local git clone
-(`~/filterlabs/ubiquity-skills`) and its working branch are caught up
+the final commit in Step 2), make sure both the local git clone (at
+`<REPO>`, resolved in Step -1) and its working branch are caught up
 with `origin/main`. Skills get edited live in the Hermes skills
 directory via `skill_manage`, but the git clone is the source of truth
 for "what does main actually look like right now" -- editing against a
@@ -34,7 +72,7 @@ stale clone risks silently redoing work already merged, or missing a
 teammate's change to the same file.
 
 ```
-cd ~/filterlabs/ubiquity-skills
+cd <REPO>
 git fetch origin
 git status            # must be clean before pulling/merging -- if dirty, stop and ask the user what to do with the local changes first
 ```
@@ -161,7 +199,7 @@ by the user as-is should you move on to re-running the leak scanner
 detail -- e.g. a fresh live-test response) and then Step 2.
 
 ## Step 2: branch -> review -> commit -> push -> PR
-All of the following happens in `~/filterlabs/ubiquity-skills` (the git
+All of the following happens in `<REPO>` (resolved in Step -1 -- the git
 clone of the GitHub mirror -- NOT the live Hermes skills directory at
 `~/.hermes/profiles/<profile>/skills/ubiquity/`, which is where you
 actually edit skills day to day with `skill_manage`). Before this step,
@@ -174,7 +212,7 @@ into this repo clone (copy the changed `SKILL.md`/supporting files over).
    change (e.g. `docs/multi-location-limit-notes`) but let them override.
    Create it off latest `main`:
    ```
-   cd ~/filterlabs/ubiquity-skills
+   cd <REPO>
    git checkout main && git pull --ff-only
    git checkout -b <branch-name>
    ```
@@ -217,6 +255,12 @@ separate yes/no decision point, not a single blanket "ok go ahead".
   clone are two separate copies on disk -- there is no automatic sync.
   Always copy the current skill content into the clone right before
   Step 2 so the diff reflects the latest edits.
+- `<REPO>`'s location is tracked in `~/.hermes/state/ubiquity-skills-repo.json`
+  (via `scripts/repo_location.py`) -- a per-machine config file OUTSIDE
+  both this skill's directory and the repo itself, so it survives both a
+  `skill_manage` update to this skill AND the user moving the repo clone
+  to a new path. If the user moves the clone, just re-run `--set` with
+  the new path; nothing else in this skill needs to change.
 - If the user has a separate scout-staging/prod skill or script mirror
   (see persistent memory for `~/filterlabs/hermes-ubiquity-scout/`),
   that is a DIFFERENT repo/workflow from this one -- don't conflate the
