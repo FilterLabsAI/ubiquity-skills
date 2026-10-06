@@ -485,14 +485,131 @@ three options:
   level ingestion accounting; `warnings` surfaces soft parse issues without
   failing the whole job.
 
-## Step 3: pipeline + feed creation, discovery job launch
-Choosing "Yes, Discover Sources" triggers, in order:
+## Step 3: pipeline + feed creation, discovery job launch -- CONFIRMED on the wire
+Choosing "Yes, Discover Sources" fires FIVE separate calls in sequence,
+not the single `POST /pipelines` previously assumed. **An earlier version
+of this skill said the pipeline-creation request body was unconfirmed and
+recommended driving the browser UI instead -- that's now resolved; a
+browser `fetch`/`XMLHttpRequest` interceptor captured the real sequence,
+and it was independently re-run as plain direct API calls (no browser)
+and confirmed to work end-to-end (pipeline created, discovery job reached
+`running`).** The sequence:
+
+**3a. Create the saved search** (persists the parsed query + filters):
 ```
-POST /api/locations/v1/pipelines        # creates the pipeline + its feed
-POST /api/orchestrator/api/v1/jobs/create   # launches the discovery job (job_type: curation)
+POST /api/locations/api/v1/saved-searches
+Content-Type: application/json
+{"name": "<query text, used as default pipeline name>",
+ "search_query": "<same query text>",
+ "search_filters": {
+   "entities": [ ...flatten parsed_entities.locations + .topics + .entity_types
+                 from the /search/unified response into one list, each
+                 entry keeping its value/type/confidence/normalized_value/
+                 aliases/metadata/languages fields verbatim... ],
+   "location_uuid": "<location.id from /search/unified>"
+ }}
 ```
+`201`, returns the saved-search object with a new `id` -- this is
+`saved_search_id` for step 3c.
+
+**3b. Create the feed** (separate resource, NOT created by the pipelines
+endpoint despite what the response shape in the old write-up implied):
+```
+POST /api/locations/api/v1/feeds
+Content-Type: application/json
+{"name": "<query text>",
+ "metadata": {"description": "Feed for search: <query text>",
+              "search_query": "<query text>"}}
+```
+`201`, returns the feed object with a new numeric `id` -- this is
+`feed_id` for step 3c. **This is the root cause of the earlier `400
+{"error": "Feed not found"}`** when `POST /pipelines` was tried directly
+with a guessed body: no feed existed yet to reference, because feed
+creation is this separate prior call, not something the pipelines
+endpoint does itself.
+
+**3c. Create the pipeline**, referencing both ids plus the original
+`/search/unified` `session_id`:
+```
+POST /api/locations/v1/pipelines
+Content-Type: application/json
+{"name": "<query text>",
+ "saved_search_id": "<id from 3a>",
+ "feed_id": <id from 3b>,
+ "auto_sync_enabled": true, "sync_on_job_completion": true, "sync_on_map_change": false,
+ "session_id": "<session_id from /search/unified>"}
+```
+`201`, returns the pipeline object (`id`, `feed_id`, `saved_search_id`,
+`session_id`, empty `metadata: {}` at this point).
+
+**3d. PATCH discovery_config onto the new pipeline** (sets the default
+query/source budget observed in the UI's "Agent Settings" defaults):
+```
+PATCH /api/locations/v1/pipelines/<pipeline_id>
+Content-Type: application/json
+{"metadata": {"discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25}}}
+```
+`200`, returns the updated pipeline with `metadata.discovery_config` set.
+
+**3e. Launch the discovery job:**
+```
+POST /api/orchestrator/api/v1/jobs/create
+Content-Type: application/json
+{"location_uuid": "<location.id>",
+ "job_type": "discovery",
+ "parameters": {
+   "search_query": "<query text>",
+   "parsed_entities": [ ...same flattened entities list as 3a... ],
+   "feed_id": <feed_id>,
+   "pipeline_id": "<pipeline_id>",
+   "vote_context": null
+ },
+ "max_queries": 15, "max_sources": 100, "min_sources": 25}
+```
+`200`, returns a job object with `status: "pending"` -> poll per Step 4
+below. **Note: the request sends `job_type: "discovery"`, but
+`GET /api/locations/api/v1/jobs/<job_id>` echoes it back as
+`job_type: "curation"`** -- confirmed live (same job, both values seen on
+the wire for the same `job_id`) and consistent with `ubiquity-discovery-
+jobs`'s existing note that the orchestrator relabels a `discovery`
+request as a `curation` job internally; this isn't a documentation error
+in either skill, both values are real, just at different points in the
+request/response cycle.
+
 The UI shows toasts "Saving pipeline..." -> "Pipeline \"<name>\" saved
-successfully!" -> "Discovery agent launched successfully!". The resulting
+successfully!" -> "Discovery agent launched successfully!" as these five
+calls land. **Fire them in this exact order** (3a -> 3b -> 3c -> 3d ->
+3e) -- each later step's body references an id returned by an earlier
+one, so none of them can be reordered or parallelized.
+
+**CONFIRMED: launching discovery (3d/3e) is OPTIONAL -- a pipeline can be
+created and saved WITHOUT ever starting a discovery job.** The Discover
+tab has a separate **"Save"** button (next to Discover/Understand/Share
+at the top) distinct from "Yes, Discover Sources". Re-ran the same
+flow (parse -> confirmation turn) but clicked **Save** instead, with an
+XHR interceptor capturing every call: it fired ONLY steps 3a-3c (saved-
+search, feed, pipeline -- byte-identical request body shapes to the
+Discover-Sources path, confirmed side-by-side) and stopped there -- no
+`PATCH .../pipelines/<id>` for `discovery_config` and no `POST
+/jobs/create` at all. Verified two ways after the Save click: (1) the
+resulting pipeline's `metadata` was still `{}` (3d never ran), and (2) a
+full scan of `GET /api/locations/api/v1/jobs?limit=10` turned up no job
+with a `created_at` anywhere near the Save click's timestamp. The UI
+itself also reflects this immediately -- the Discover tab shows a
+**"Discover Sources"** button (not "Discovery Status: running") right
+after Save, i.e. the pipeline exists but discovery hasn't started.
+
+**Practical implication**: if a user wants a pipeline/feed to exist for
+later (e.g. to import sources manually via `sources/upload` instead of
+agentic discovery, or to configure Agent Settings before committing to a
+discovery run) run only 3a-3c and stop -- don't assume discovery must be
+launched as part of pipeline creation. The equivalent direct-API
+shortcut is simply to skip steps 3d and 3e; discovery can always be
+launched later by running 3d (if you want `discovery_config` set) then
+3e once the user actually confirms it, exactly like the UI's own "Discover
+Sources" button on an already-saved pipeline does.
+
+The resulting
 pipeline object (`GET /api/locations/v1/pipelines/<id>`) looks like:
 ```json
 {
@@ -518,12 +635,12 @@ List pipelines: `GET /api/locations/v1/pipelines?limit=10&offset=0&order_by=crea
 (also filterable by `?saved_search_id=<uuid>&limit=300`).
 
 ## Step 4: track the discovery job
-The discovery job is slow -- in testing a "curation" job took **15-20+
-minutes** to go from 0% to completion against a continent-scale location +
-broad topic. Poll either:
+The discovery job is slow -- in testing a job took **15-20+ minutes** to
+go from 0% to completion against a continent-scale location + broad
+topic. Poll either:
 ```
 GET /api/locations/api/v1/jobs/<job_id>
-  -> {id, location_uuid, location_name, job_type: "curation", status: pending|running|completed|failed|cancelled,
+  -> {id, location_uuid, location_name, job_type: "curation" (see Step 3e note on discovery->curation relabeling), status: pending|running|completed|failed|cancelled,
       progress (0-100 int), error_message, parameters (base64), result_data, created_at, updated_at, completed_at, pipeline_id}
 GET /api/orchestrator/jobs/<job_id>/async-status
   -> {job_id, pending_count, processed_count, failed_count, total_count, all_complete, has_async_work, last_updated, snapshots}
@@ -617,3 +734,15 @@ likely just re-PATCHes with the default values shown above).
   until that confirmation.
 - Discovery jobs are genuinely slow (tens of minutes). Don't assume a job is
   stuck just because progress is still low after a minute or two.
+- **Pipeline creation is a 5-call sequence (saved-search -> feed ->
+  pipeline -> PATCH metadata -> jobs/create), not a single `POST
+  /pipelines`** -- see Step 3 above. Calling `POST
+  /api/locations/v1/pipelines` alone, before a feed exists, fails with
+  `400 {"error": "Feed not found"}` -- that's not a sign the endpoint is
+  broken, it's a sign the feed-creation call (3b) was skipped.
+- **Starting discovery is optional, not required, to create a pipeline**
+  -- the first 3 of those 5 calls (saved-search, feed, pipeline) are all
+  that's needed for a pipeline/feed to exist; the UI's "Save" button
+  (vs. "Yes, Discover Sources") confirms this live -- see Step 3. Don't
+  assume you must launch a discovery job just because the user asked for
+  a pipeline to be created.
