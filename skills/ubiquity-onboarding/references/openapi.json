@@ -411,7 +411,7 @@
       "get": {
         "summary": "Direct Data Feed (Curator Locations) API -- raw content items, full corpus (no 1000-item display cap), for Hermes-side direct reasoning/analysis over feed content. See ubiquity-data-feed-api.",
         "parameters": [
-          {"name": "id", "in": "path", "required": true, "schema": {"type": "integer"}, "description": "feed_id (path param name is 'id')"},
+          {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}, "description": "feed_id"},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000}},
           {"name": "offset", "in": "query", "schema": {"type": "integer", "default": 0, "minimum": 0, "maximum": 10000}},
           {"name": "cursor", "in": "query", "schema": {"type": "string", "format": "date-time"}, "description": "UNCONFIRMED advancement behavior -- see skill pitfalls"},
