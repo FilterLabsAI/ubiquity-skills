@@ -696,9 +696,31 @@ jobs only (not the one already running). Fields:
 - **Evaluation Agent** -> `agent_config.evaluation`: `quality_standards`
   (e.g. `moderate`), `local_focus_priority` (e.g. `medium`),
   `credibility_threshold` (float 0-1, e.g. 0.5), `topic_relevance_weight`
-  (float 0-1, e.g. 0.5). (UI section exists but detailed per-field controls
-  were not individually exercised -- confirm against the live dialog if you
-  need to script a specific value.)
+  (float 0-1, e.g. 0.5), and **`custom_instructions`** (string) --
+  CONFIRMED on the wire: this is a genuine, separate free-text field
+  (its own textarea in the dialog, placeholder "E.g., 'Prioritize sources
+  with daily updates and strong local community engagement'"), distinct
+  from `search_generation.custom_instructions` above. An earlier version
+  of this skill said the Evaluation Agent's "detailed per-field controls"
+  (implicitly including a custom-instructions field) were unconfirmed --
+  that was wrong on this specific point; `agent_config.evaluation.custom_instructions`
+  is real and round-trips correctly through `PATCH .../pipelines/<id>`
+  (verified: set it to a hard-reject rule listing disallowed domain
+  categories, saved, and `GET .../pipelines/<id>` echoed it back
+  unchanged with a bumped `updated_at`). Use it for rules the evaluation
+  stage should enforce regardless of what `search_generation.custom_instructions`
+  already told the query-generation stage to search for -- e.g. a hard
+  type/domain exclusion list, since a high `credibility_score` alone
+  will NOT make the evaluation agent reject an off-type source (news
+  outlets, vendor docs, gov sites, academic papers all tend to score
+  high credibility) unless this field explicitly tells it to.
+  `search_generation.custom_instructions` steers what the discovery
+  agent SEARCHES FOR; `evaluation.custom_instructions` steers what the
+  evaluation agent ACCEPTS/REJECTS once found -- they are two different
+  gates and a mismatch between the two (e.g. a social-media-only
+  instruction in search_generation with no matching hard-reject rule in
+  evaluation) is a likely root cause if a pipeline's discovered sources
+  keep including categories the search instructions say to avoid.
 
 Save with "Save Settings" -- CONFIRMED on the wire:
 ```
