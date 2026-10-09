@@ -109,6 +109,20 @@ present in this profile) uses the SAME token against
 401 errors usually mean the refresh_token itself expired (>8h idle) --
 re-run `--login` with fresh credentials.
 
+### WAF 403s on raw API calls (not SPA/browser_exec)
+If you script direct REST calls (e.g. Python `urllib`/`requests`, `curl`)
+against `ubiquity.filterlabs.ai/api/...` instead of going through
+`browser_exec`, a request with NO `User-Agent` header (or a generic
+library default like `Python-urllib/3.x`) gets rejected by Ubiquity's
+edge/WAF with `403` + Cloudflare `error_code: 1010` ("Access denied... the
+site owner has blocked access based on your browser's signature") --
+even with a fully valid Bearer token. Fix: always set a normal
+browser-style `User-Agent` string (e.g. a current Chrome desktop UA) on
+every request. `curl` with an explicit `-H "User-Agent: Mozilla/5.0..."`
+works fine; so does `browser_exec` (gets a real UA automatically, never
+hits this). See `ubiquity-entity-review`'s `entity_review.py` and this
+skill's `filterlabs_auth.py` for working examples of setting it.
+
 ### Getting your Keycloak user UUID (needed by some endpoints)
 Some endpoints (e.g. entity voting in `ubiquity-entity-review`) want your
 Keycloak **user UUID**, not your email, even though response bodies
