@@ -49,7 +49,13 @@ endpoint exercised across the `ubiquity-*` skill family) and
    social/sentiment, government/policy, economic data).
 4. **Run the discovery job and review entities.** Discovery is a slow
    agentic job (15-20+ min, sometimes longer); it searches, evaluates,
-   and proposes candidate sources. Once sources appear, review them:
+   and proposes candidate SOURCES ("entities") -- people, accounts,
+   publications, outlets -- not individual pieces of content. Reviewing
+   an entity is a judgment about whether that SOURCE is likely to keep
+   producing content relevant to the questions/conversations the end
+   user cares about -- NOT a review of any specific article/post/comment
+   it has already published; content-level review happens later, once
+   artifacts are ingested (step 6). Once sources appear, review them:
    like/dislike/flag/remove, read the AI's own written evaluation notes
    per source, and optionally run the automated suggestion pass. An
    entity whose attached source URLs actually span unrelated topics
@@ -57,7 +63,8 @@ endpoint exercised across the `ubiquity-*` skill family) and
    via a preview-then-commit flow -- destructive and can span multiple
    feeds at once, since one entity can be shared across pipelines. Your
    votes feed directly into the NEXT discovery job's prompt as positive/
-   negative examples. See `ubiquity-entity-review` and
+   negative examples. See `ubiquity-entity-review` (which has the full
+   explanation of this source-vs-content distinction) and
    `ubiquity-discovery-jobs` (including the "never stack discovery jobs"
    rule and the two-save-paths distinction).
 5. **Scale up discovery as needed.** "Increase Coverage" (Low/Medium/
@@ -65,10 +72,15 @@ endpoint exercised across the `ubiquity-*` skill family) and
    the direction entities are heading, incorporating your votes. One
    pipeline runs one discovery job at a time. See `ubiquity-discovery-jobs`.
 6. **Enable the Understand layer and set a refresh interval.** This is
-   where raw discovered sources start actually being scanned/ingested
-   into analyzable "artifacts" (articles/posts/content). Set how often
-   the feed re-syncs (Do Not Update / 12h / Daily / Weekly / etc -- a
-   single auto-saving dropdown). See `ubiquity-understand-layer`. To
+   where the entities kept in step 4 actually start being MONITORED --
+   each liked/kept entity is periodically re-scanned for new articles/
+   posts/comments, which get ingested into analyzable "artifacts"
+   (individual pieces of content). This is the point where "is this a
+   good source" (step 4) turns into "what is this source actually
+   saying" (this step onward) -- the two are genuinely different
+   questions answered at different stages, see `ubiquity-entity-review`.
+   Set how often the feed re-syncs (Do Not Update / 12h / Daily / Weekly
+   / etc -- a single auto-saving dropdown). See `ubiquity-understand-layer`. To
    check whether artifacts have actually started arriving yet (vs. still
    "Collecting data..."), poll `GET /api/understand/artifacts/count/
    <feed_id>` -- this was broken (returned the same stale account-wide

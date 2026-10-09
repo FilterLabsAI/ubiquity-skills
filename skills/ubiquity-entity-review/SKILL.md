@@ -10,6 +10,44 @@ the feed's entity list for human review. This skill covers listing,
 filtering, and voting on (or removing) those discovered sources/datasets.
 Requires a valid Bearer token -- see `ubiquity-auth`.
 
+## CRITICAL conceptual distinction: you are NOT reviewing content
+An "entity" here is a SOURCE (a person, account, publication, or outlet)
+-- not a specific article/post/comment it produced. Voting on an entity is
+NOT a content-moderation judgment on anything that entity has said or
+written so far. The question a vote actually answers is: **"is this
+entity, as an ongoing source, likely to produce content relevant to the
+conversations/questions the end user wants this feed to answer?"** --
+a forward-looking relevance/fit judgment about the SOURCE, not a
+backward-looking quality judgment about any one piece of CONTENT.
+Concretely:
+- A liked/kept entity is added to ongoing MONITORING -- once the
+  Understand layer is enabled (`ubiquity-understand-layer`), the feed
+  periodically re-scans that entity for new articles/posts/comments and
+  ingests them as "artifacts," on whatever refresh interval the pipeline
+  is set to. The vote happens once (per entity, until you change it);
+  the monitoring it triggers is continuous.
+- A disliked/removed entity stops being monitored going forward -- it
+  does not retroactively judge or remove any artifacts already ingested
+  from it, and it says nothing about whether that entity's past content
+  was "good" or "bad," only that it's not a source worth continuing to
+  track for this feed's purpose.
+- The `credibility_score`/`quality`/`local_focus`/`type` fields and the
+  free-text evaluation notes (see "Full free-text AI evaluation notes"
+  below) describe the SOURCE's general characteristics (is it a real
+  outlet, how reliable is it, is it US-focused, etc.) -- they are inputs
+  to the relevance-as-a-source judgment, not a review of any specific
+  thing it published.
+- Actually reading/analyzing the CONTENT an entity has produced (its
+  individual articles/posts/comments once ingested) is a DIFFERENT, LATER
+  step -- that's the Understand layer / Data Browser / Ubi chat / direct
+  feed-stream API (see `ubiquity-understand-layer`, `ubiquity-ubi-chat`,
+  `ubiquity-data-feed-api`), not this entity-review step.
+Keep this distinction in mind when writing vote-queue reasoning or
+suggest-pass justifications: "this source is unlikely to keep producing
+relevant content" is a valid entity-review reason; "this one post was
+low-quality" is not a reason to vote on the entity (it may be a reason to
+flag a data/evaluation problem, but it's a different kind of claim).
+
 ## List entities for a feed -- CONFIRMED
 ```
 GET /api/locations/api/v1/feeds/<feed_id>/entities?limit=100&offset=0&q=&order_by=vote&order=asc&type=all
