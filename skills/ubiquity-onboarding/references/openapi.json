@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.4.0",
-    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save. v1.3.0: corrected the chat-sessions messages POST -- required field is 'message' not 'content', confirmed the call is SYNCHRONOUS (reply returned inline, no polling needed on a fresh send), documented the full confirmed response shape including filter_update, and added the confirmed DELETE .../sessions/{id} cleanup endpoint; this is now the preferred way to drive Ubi chat over browser_exec on the SPA (see ubiquity-ubi-chat). v1.4.0: captured the real pipeline-creation request bodies via an XHR interceptor on the live SPA (previously unconfirmed/guessed and wrongly thought to require the browser) -- added saved-searches POST and feeds POST as the two calls that must precede pipelines POST, filled in the pipelines POST's actual request body, and confirmed launching a discovery job (pipelines PATCH + jobs/create) is a SEPARATE, OPTIONAL step -- the UI's 'Save' button stops after pipeline creation and never fires either call, verified by comparing captured requests, the resulting pipeline's empty metadata, and the account-wide jobs list. Also corrected artifacts/count/{feed_id}: the per-feed-count bug is FIXED server-side as of 2026-10-06 (re-verified live across 5 feeds with distinct, accurate counts) -- it is no longer unreliable and is now the preferred fast ingestion-progress check over artifacts/preview's total_count."
+    "version": "1.5.0",
+    "description": "Reverse-engineered from live traffic across the ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, ubiquity-pipeline-sharing, and ubiquity-data-feed-api skills. NOT an official spec -- confirm against the live backend before depending on exact field presence; several fields observed live are undocumented elsewhere (see each skill's Pitfalls section). v1.1.0: added search/unified refine-loop fields, Import Sources (sources/upload + dataset-upload workflow), entity split-preview/split, additional feed interval fields, and flagged filter_prompt/filter_distance + route filter_mode/filter_config as accepted-on-write but UNVERIFIED-in-effect (see each schema's description). v1.2.0: re-confirmed the pipelines PATCH as the Agent Settings save endpoint directly off a real Save Settings click (ubiquity-agent-settings now documents its own GET/PATCH calls inline instead of only cross-referencing this file), and confirmed Quick Presets are pure client-side state with no network call until Save. v1.3.0: corrected the chat-sessions messages POST -- required field is 'message' not 'content', confirmed the call is SYNCHRONOUS (reply returned inline, no polling needed on a fresh send), documented the full confirmed response shape including filter_update, and added the confirmed DELETE .../sessions/{id} cleanup endpoint; this is now the preferred way to drive Ubi chat over browser_exec on the SPA (see ubiquity-ubi-chat). v1.4.0: captured the real pipeline-creation request bodies via an XHR interceptor on the live SPA (previously unconfirmed/guessed and wrongly thought to require the browser) -- added saved-searches POST and feeds POST as the two calls that must precede pipelines POST, filled in the pipelines POST's actual request body, and confirmed launching a discovery job (pipelines PATCH + jobs/create) is a SEPARATE, OPTIONAL step -- the UI's 'Save' button stops after pipeline creation and never fires either call, verified by comparing captured requests, the resulting pipeline's empty metadata, and the account-wide jobs list. Also corrected artifacts/count/{feed_id}: the per-feed-count bug is FIXED server-side as of 2026-10-06 (re-verified live across 5 feeds with distinct, accurate counts) -- it is no longer unreliable and is now the preferred fast ingestion-progress check over artifacts/preview's total_count. v1.5.0: added the pipeline-sharing endpoint family (organizations list, organization-members list, pipeline-permissions list, per-pipeline grant PUT) -- sharing a pipeline is restricted to users who already belong to one of the account's organizations, confirmed no free-text/arbitrary-email invite path exists."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
@@ -453,6 +453,37 @@
     },
     "/locations/api/v1/saved-searches/{saved_search_id}": {
       "put": {"summary": "Re-save the pipeline's saved search_query/search_filters (fired as part of the coverage-level launch sequence)", "parameters": [{"name": "saved_search_id", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "updated saved-search object"}}}
+    },
+    "/locations/v1/organizations": {
+      "get": {
+        "summary": "List organizations the current user belongs to. See ubiquity-pipeline-sharing -- the first of two calls needed to resolve who a pipeline can validly be shared with.",
+        "responses": {"200": {"description": "array of {name, uuid, licensed_seats} -- most accounts see exactly one org"}}
+      }
+    },
+    "/locations/v1/permissions/organization/{org_uuid}": {
+      "get": {
+        "summary": "List members of an organization, i.e. the only valid pipeline-sharing targets. See ubiquity-pipeline-sharing.",
+        "parameters": [{"name": "org_uuid", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "array of {ability, keycloak_user_id} -- despite the key name, keycloak_user_id here is the member's EMAIL, not a UUID; ability reflects an org-level default/baseline, not per-pipeline access"}}
+      }
+    },
+    "/locations/v1/permissions/pipeline/{pipeline_id}": {
+      "get": {
+        "summary": "List current sharing grants for a pipeline. See ubiquity-pipeline-sharing.",
+        "parameters": [{"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}}],
+        "responses": {"200": {"description": "array of {ability, keycloak_user_id} (email), same shape as the organization members endpoint"}}
+      }
+    },
+    "/locations/v1/permissions/pipeline/{pipeline_id}/{email}": {
+      "put": {
+        "summary": "Grant a specific org member access to a pipeline. The Share dialog's two checkboxes (View/Edit) only ever fire this with ability=write when Edit is checked -- confirmed on the wire; view-only grant string is unconfirmed, try 'read' and verify via the GET above. See ubiquity-pipeline-sharing.",
+        "parameters": [
+          {"name": "pipeline_id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "email", "in": "path", "required": true, "schema": {"type": "string"}, "description": "target user's email, sent as a plain (not URL-encoded) path segment"}
+        ],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "properties": {"ability": {"type": "string", "example": "write", "description": "CONFIRMED 'write' (implies read); 'read'/view-only UNCONFIRMED"}}}}}},
+        "responses": {"200": {"description": "OK"}}
+      }
     }
   }
 }
