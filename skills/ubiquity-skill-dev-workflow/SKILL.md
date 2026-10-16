@@ -198,6 +198,42 @@ by the user as-is should you move on to re-running the leak scanner
 (sensitive data can get pulled in incidentally while adding corrective
 detail -- e.g. a fresh live-test response) and then Step 2.
 
+## Step 1.75: scrub user-specific queries, business needs, and investigation subject matter
+Steps 1 and 1.5 catch sensitive DATA and shaky REASONING, but neither
+catches a THIRD distinct failure mode: a worked example that reveals
+WHAT the user/org is actually investigating, searching for, or building
+-- even with no literal secret (no token, no UUID, no email) in it. This
+repo is public-ish within the org and anything merged to `main` is a
+shared, long-lived artifact; a skill's job is to teach the MECHANISM
+(an API shape, a UI quirk, a bug), not to double as a diary of a real
+investigation, customer name, or business question. Scan every file
+about to be committed for:
+- A specific named organization, person, or entity the user is actually
+  investigating (as opposed to Ubiquity's own account/org names covered
+  in Step 1 -- this is about the user's RESEARCH TARGET, not Ubiquity
+  account metadata).
+- Literal keyword/query lists lifted verbatim from a real custom
+  instructions field, saved search, or chat session -- these often
+  reveal the user's specific topic/threat-model even when individually
+  bland words.
+- Pipeline/feed/saved-search NAMES the user actually chose for a real
+  piece of work (e.g. a project codename) -- even an innocuous-looking
+  name can be the one identifying detail that ties an example back to a
+  real, possibly confidential, piece of work.
+- Any framing in prose (not just literal strings) that describes the
+  user's actual business need, client, or use case rather than a
+  generic illustrative scenario.
+
+For each finding, rewrite the example to be fully generic and
+self-contained -- use placeholder subject matter (e.g. "a specific named
+subject of interest", `<term 1>`/`<term 2>`, `test-pipeline-1`, a neutral
+domain like "renewable energy policy") that still demonstrates the exact
+mechanism/bug/API-shape being documented. The teaching value should
+survive the genericization intact -- if it doesn't, the right fix is a
+better-chosen neutral example, not a vaguer one. Treat this step as
+mandatory before Step 2, same as Steps 1 and 1.5 -- a leak of "what we're
+working on" is a real leak even when it contains no credential.
+
 ## Step 2: branch -> review -> commit -> push -> PR
 All of the following happens in `<REPO>` (resolved in Step -1 -- the git
 clone of the GitHub mirror -- NOT the live Hermes skills directory at
@@ -245,6 +281,17 @@ into this repo clone (copy the changed `SKILL.md`/supporting files over).
 
 Never skip the user-approval gates in steps 3, 5, and 6 -- each is a
 separate yes/no decision point, not a single blanket "ok go ahead".
+
+**Keep commit messages and PR descriptions terse and mechanism-focused
+-- do not narrate what was cleaned up or why.** If this work follows a
+leak cleanup (Steps 1/1.5/1.75 above, or a prior closed PR), do NOT add
+a "Note" section or any sentence explaining that a previous PR/commit
+contained leaked content, what kind of content it was, or what was
+scrubbed -- that narration itself re-describes the sensitive subject
+matter (even in generic terms like "a specific confidential
+investigation") and draws a reader's attention to go look for it in
+closed PRs/reflog. State only what the current skill content IS (the
+mechanism/bug/API being documented), never what it ISN'T or used to be.
 
 ## Notes
 - `gh` (GitHub CLI) must be authenticated (`gh auth status`); if not, run

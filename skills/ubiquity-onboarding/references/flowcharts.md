@@ -102,3 +102,14 @@ flowchart LR
     A3 -->|"Pipeline Route"| D
     D --> E["Unified Understand layer\nview across all regions"]
 ```
+
+## 6. Pipeline sharing
+
+```mermaid
+flowchart TD
+    A["User clicks 'Share' on a pipeline"] --> B["GET /locations/v1/organizations\n(which org(s) does the user belong to?)"]
+    B --> C["GET /locations/v1/permissions/\norganization/{org_uuid}\n(list org members -- the ONLY valid\nshare targets, no free-text email invite)"]
+    C --> D["User picks a teammate +\nView or Edit checkbox"]
+    D --> E["PUT /locations/v1/permissions/\npipeline/{pipeline_id}/{email}\n{ability: 'write'}\n(Edit auto-implies View in the UI;\nonly ONE PUT fires either way)"]
+    E --> F["GET /locations/v1/permissions/\npipeline/{pipeline_id}\n(verify the grant landed)"]
+```
