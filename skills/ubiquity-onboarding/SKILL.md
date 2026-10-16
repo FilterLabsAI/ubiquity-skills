@@ -127,6 +127,14 @@ endpoint exercised across the `ubiquity-*` skill family) and
    until re-tested with a longer observation window or a fresh discovery
    job on the source pipeline.
 
+9. **Share a pipeline with teammates** (optional, any time after
+   creation). A pipeline can be shared with other members of your
+   Ubiquity organization for view/edit access -- but ONLY with users who
+   already belong to one of your orgs, there is no free-text/arbitrary-
+   email invite path. See `ubiquity-pipeline-sharing` for the org/member-
+   roster endpoints needed to resolve valid share targets plus the
+   per-pipeline grant endpoints.
+
 ## Skill map (which skill, which step)
 
 | Step | Skill |
@@ -141,6 +149,7 @@ endpoint exercised across the `ubiquity-*` skill family) and
 | Chat with Ubi about the feed | `ubiquity-ubi-chat` |
 | Direct raw-data API access for Hermes-side reasoning | `ubiquity-data-feed-api` |
 | Connect pipelines together / egress | `ubiquity-pipeline-routing` |
+| Share a pipeline with teammates | `ubiquity-pipeline-sharing` |
 
 ## Key cross-cutting rules (apply at every step)
 - Never launch a new discovery job as a side effect of an unrelated save
@@ -149,9 +158,19 @@ endpoint exercised across the `ubiquity-*` skill family) and
   / coverage-level button actually launches a job (`ubiquity-discovery-jobs`).
 - `feed_id` (artifacts, metrics, chat, refresh interval, votes-list-by-
   pipeline aside) vs `pipeline_id` (agent settings, routes, discovery
-  jobs) are different ids on the same object -- keep both once you have
-  them (`GET /api/locations/v1/pipelines/{id}` returns both).
+  jobs, sharing) are different ids on the same object -- keep both once
+  you have them (`GET /api/locations/v1/pipelines/{id}` returns both).
 - Changes to Agent Settings and metric generators apply going forward
   only -- never retroactively re-score/re-search past data.
 - Everything requires a valid Bearer token refreshed via `ubiquity-auth`;
   tokens expire ~30 min, re-bootstrap browser sessions as needed.
+- Chat-driven refine actions (location/topic changes during pipeline
+  creation) silently overwrite the pipeline's own name/search_name/
+  feed_name as a side effect -- if the pipeline had a custom name, it
+  will need to be re-set via `PATCH`/`PUT` after any such refine; see
+  `ubiquity-pipeline-creation`.
+- Place-name geocoding can resolve to the wrong location even for an
+  ordinary (non-supranational) query -- a short/common place name can
+  collide with an unrelated, more specific place sharing the same text.
+  Always sanity-check a newly-resolved location's bounding box size/
+  position before trusting it; see `ubiquity-pipeline-creation`.
