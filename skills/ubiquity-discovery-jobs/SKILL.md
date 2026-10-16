@@ -164,7 +164,30 @@ confirmed; the page likely filters client-side via its Location dropdown)
 and shows Status/Type/Location/Progress/Created/Updated/Results columns
 for every job on the account.
 
-## Expectations on duration -- IMPORTANT, jobs can stall
+## Terminal statuses -- IMPORTANT, more than just completed/failed/cancelled
+A job's `status` can also land on **`partial_failure`** as a genuine
+TERMINAL state -- confirmed live: a job reached `progress: 100`,
+`completed_at` set, `updated_at` stopped advancing, with `status:
+"partial_failure"` (not `"completed"`). If you're scripting a poll loop
+that only treats `completed`/`failed`/`cancelled` as terminal (e.g. to
+free a concurrency-throttle slot and launch the next queued job), add
+`partial_failure` to that terminal-state set too -- otherwise the poller
+will treat it as eternally "still running" and never launch anything
+queued behind it, silently losing a concurrency slot for the rest of the
+run. No `error_message` was present on this job despite the non-success
+status, so don't rely on `error_message` being non-null as the signal
+that something didn't fully succeed -- check `status` itself.
+
+## Expectations on duration -- IMPORTANT, jobs can stall, and duration varies a lot even when healthy
+Across 36 discovery jobs run in one session (18 pipelines, run twice),
+individual job runtime ranged from under 20 minutes to well over an hour
+-- with NO errors and steady `progress`/`updated_at` advancement
+throughout (i.e. not stalled, just genuinely slower). Don't treat the
+"15-20+ minutes" figure below as a ceiling for a healthy job -- 15 minutes
+to 1+ hour is normal variance for a job that is NOT stalled; only treat a
+job as suspect if `updated_at` stops advancing for tens of minutes (the
+genuine stall case described next), not just because it's taking longer
+than ~20 minutes.
 Discovery/curation jobs are slow agentic pipelines (observed 15-20+
 minutes for a broad location+topic). **However, a job can also fully
 stall**: one test job sat at `status: "running"`, `progress: 10` for over

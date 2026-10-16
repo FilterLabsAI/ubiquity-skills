@@ -482,6 +482,34 @@ leave Custom Instructions empty rather than padding it with restated
 config. Keep instructions short, imperative, and specific (one or two
 sentences) -- this feeds a query-generation prompt, not a brief.
 
+**Reasoned but not isolated by a clean A/B test: adding literal, concrete
+search terms to custom_instructions can improve on-topic discovery vs.
+pure prose/thematic phrasing.** A first attempt phrased search_generation
+custom instructions thematically ("focus on cryptocurrency tracking,
+cybercrime infrastructure and backends, underground networks, and the
+criminal organization Haozi/Ironman/Phoenix") -- the discovery agent still
+mostly generated generic "local news in Province X" queries, yielding
+only 1 genuinely on-topic entity out of 790 discovered (0.1%) across 18
+real pipelines. A re-run with the SAME intent rewritten as an explicit,
+literal list of search terms the agent should use verbatim (e.g. for a
+Chinese-language cybercrime/fraud pipeline: "Generate search queries
+using these SPECIFIC terms: 诈骗, 电信诈骗, 跨境诈骗, 网络犯罪, 洗钱, 虚拟货币诈骗,
+USDT跑分, 资金盘, 杀猪盘, 黑产, 境外电诈园区. Also search explicitly for
+[organization name] and its aliases combined with these terms.") saw a 7x
+increase in strong topic-relevant hits and 3x increase in moderate hits.
+**Caveat: this was NOT an isolated variable** -- the same re-run also
+removed 85 off-topic entities from the prior pass and widened
+`focus_types` to include `news`/`government` (not just `social`/`blog`),
+so some of the improvement is plausibly attributable to those changes
+rather than the instruction-phrasing change alone; the result has not
+been re-tested with the literal-terms change in isolation. Lesson, stated
+at the appropriate confidence: when writing Search Generation Custom
+Instructions for a narrow/specific topic, prefer handing the agent
+literal strings to search for (in the target language) over a prose
+description of the user's goal -- this is a reasonable practice to
+recommend, but don't cite the 7x/3x figures as proof of that one change's
+effect in isolation.
+
 ### Step 9 -- Evaluation Agent Custom Evaluation Criteria (free text)
 Where Search Generation Custom Instructions (Step 7) shapes what gets
 SEARCHED FOR, Custom Evaluation Criteria shapes what gets ACCEPTED once

@@ -82,6 +82,33 @@ member state (or a non-member state entirely, as seen with the US-based
 African Union/Eurozone mismatches), that is itself a strong signal
 something went wrong.
 
+**Ambiguous geocoding is NOT limited to supranational entities -- ordinary
+same-named places collide too.** Confirmed live: querying a bare Chinese
+province name, `"Hebei"`, resolved to a tiny county-level spot inside
+**Heilongjiang** province (near the Russian border, bounding box roughly
+0.02 degrees wide) instead of Hebei province itself. The same bounding-
+box-size sanity check recommended below for supranational entities
+applies to ANY short/common place name that collides with a larger
+place's name, not just country-group names -- always check the box size
+before trusting a resolved location, regardless of whether the query
+looks like a country-group or an ordinary single place. Fix: disambiguate
+with a longer query, e.g. `"Hebei Province, China"` resolved correctly
+(lon 113.5-120.0, lat 36.0-42.6, around Beijing) where bare `"Hebei"` did
+not.
+
+**Scriptable alternative to the chat-based fix, for when you already know
+the correct resolved location and don't want to drive the UI chat flow**:
+resolve the correct location via `/api/orchestrator/search/unified`, then
+`PUT` the pipeline's **saved-search** record directly with the corrected
+`search_filters`/`location_uuid` (see `ubiquity-pipeline-creation`'s saved-
+search PUT shape below). Confirmed: `pipeline.search_filters` denormalizes
+LIVE from the saved-search record -- a `GET` on the pipeline immediately
+reflects the saved-search PUT, with no separate pipeline-level call
+needed. This is faster and more reliable than the chat flow when scripting,
+but note the chat flow also updates `pipeline.name`/`search_name`/
+`search_query`/`feed.name` as a side effect (see below) which the direct
+saved-search PUT does NOT do -- pick whichever side effect profile you want.
+
 **CONFIRMED FIX -- use the pre-confirmation "Change Location" chat
 action**: the fix is NOT the Discover tab's post-creation "Edit" button
 (see below for why that one doesn't work) -- it is a specific button only
@@ -122,6 +149,25 @@ real, correctly geocodable place (the organization's actual seat/
 headquarters city, or a specific member country) in the follow-up
 message. This works both before AND after a pipeline is created/discovery
 has started -- it is a chat correction either way, not a config field.
+
+**CONFIRMED destructive side effect of the chat-refine flow (Change
+Location / Add <place> / any "Continue Refining" turn): it silently
+overwrites the pipeline's OWN name.** Every refine-chat action re-derives
+`pipeline.name`, `saved_search.name`/`search_name`, `search_query`, AND
+`feed.name` from the new query text -- confirmed live: a pipeline named
+`"acct1"` became `"sources in China"` and one named `"acc2"` became
+`"acc2 in China"` purely from running a location-change refine, with no
+other action taken. If you need the pipeline's custom name to survive a
+chat-based location/topic edit, re-PATCH `pipeline.name` AND re-PUT
+`feed.name` immediately afterward -- these are two independently
+denormalized name fields, both need fixing, neither self-heals.
+
+**CONFIRMED: `POST /api/orchestrator/search/unified` has an undocumented
+server-side minimum on `max_new_sources` of 10.** Sending `max_new_sources:
+5` (or anything below 10) returns `422 {"detail":[{"type":
+"greater_than_equal","loc":["body","max_new_sources"],"msg":"Input should
+be greater than or equal to 10"...}]}`. Always use `>= 10` even for a
+throwaway/cheap probe call.
 
 **CONFIRMED: the "Edit" button ALSO works on an already-created pipeline,
 including one with a discovery job actively `running`** -- an earlier
@@ -633,6 +679,30 @@ used for permissions, agent settings, and routing. Keep both.
 
 List pipelines: `GET /api/locations/v1/pipelines?limit=10&offset=0&order_by=created_at&order=DESC`
 (also filterable by `?saved_search_id=<uuid>&limit=300`).
+
+**CONFIRMED live backend bug: renaming a saved-search's `name` field
+alone fails server-side, while its OTHER fields PUT successfully on the
+same record.** `PUT`/`PATCH /api/locations/v1/saved-searches/<id>`
+consistently returns `500 {"error":"Failed to update saved search"}`
+when the body changes `name` -- tried every combination (name only, full
+body with search_query/search_filters/is_default all re-sent). This is
+NOT a sign the endpoint is broken generally: a PUT to the SAME record
+changing only `search_filters`/`location_uuid` (no name change) succeeds
+with `200`. So renaming specifically is broken, not the endpoint as a
+whole -- don't retry a name-only PUT expecting it to eventually succeed,
+and don't assume a `500` here means your other field changes failed too
+(verify with a separate GET). Flag this to the Ubiquity team as a known
+server bug rather than treating it as something to work around on the
+client side.
+
+**CONFIRMED: `GET /api/locations/v1/locations?q=<text>&limit=<n>` and
+`GET /api/locations/v1/locations/<uuid>` use an unusual double-nested
+response envelope**, unlike every other endpoint in this skill family
+(which return flat JSON): the list endpoint returns `{"data": {"data":
+[...]}}` and the single-record endpoint returns `{"data": {"data":
+{...}}}`. Code written assuming a flat response shape will silently get
+`None`/empty results against these two endpoints specifically -- unwrap
+twice (`resp["data"]["data"]`), not once.
 
 ## Step 4: track the discovery job
 The discovery job is slow -- in testing a job took **15-20+ minutes** to

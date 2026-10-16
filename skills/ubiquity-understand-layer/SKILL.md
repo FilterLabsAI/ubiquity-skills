@@ -255,6 +255,44 @@ whatever other `filter_state` keys are active render as additional chips
 `topics`, `entities`, `dateRange`, `siteTypes`, `metricName`, `textSearch`,
 `entityTypes`).
 
+**CONFIRMED: `filter_state.topics` on `artifacts/preview` is genuine
+semantic/embedding-based relevance search, NOT literal keyword/substring
+matching** -- confirmed by passing a topic string (e.g. `"cybercrime"`)
+and getting back a continuous relevance `score` per artifact (observed
+range ~0.27-0.41) plus results that are thematically on-topic with ZERO
+literal word overlap (e.g. topic `"cybercrime"` surfaced a NSA state-actor
+attribution press release and a Japan-Australia-India-US "Quad" cyber-
+diplomacy meeting announcement -- neither contains the word "cybercrime").
+This is strictly better than the Data Feed API's `text_search` (see
+`ubiquity-data-feed-api`) for broad-theme discovery, since it avoids
+literal-string false positives (keyword search for the Chinese word for
+"Phoenix", 凤凰, returned 17 hits that were ALL a media brand name or a
+real-estate development, zero about any actual phoenix-adjacent topic;
+the topic filter has no equivalent false-positive mode for broad themes).
+Call shape: `{"feed_id": <id>, "filter_state": {"topics": ["<topic
+string>"], "dateRange": {...}}, "limit": 1000}` -- same endpoint/shape as
+the rest of this section, `topics` just needs to actually be populated.
+
+**CONFIRMED failure mode: topic-filter search degrades badly on a
+NARROW/SPECIFIC named entity, rather than failing cleanly.** Querying a
+specific organization's name (tested: a criminal organization's Chinese
+alias, a two-character personal-name-like string) does NOT reliably find
+content that genuinely mentions that organization -- instead it either
+(a) semantically drifts onto the generic concept word in the query (e.g.
+querying "<org name> criminal organization" surfaced OTHER, unrelated
+criminal-organization news purely on the "criminal organization" phrase)
+or (b) drifts onto unrelated content sharing the literal name string if
+it's also a common word/name (e.g. a two-character alias that is also an
+ordinary first name surfaced K-pop fan content and idol-related posts,
+not the organization). Lesson: use topic-filter semantic search for
+BROAD THEME discovery (confirmed reliable), not for confirming/denying
+whether a specific narrow named entity appears in a corpus -- for that,
+cross-check with literal `text_search` (`ubiquity-data-feed-api`) AND
+manually eyeball a sample of the topic-filter's returned items, since
+neither technique alone is trustworthy for a specific-name query and a
+non-zero hit count under either method does NOT by itself confirm a
+genuine match.
+
 **Chart data endpoint -- CONFIRMED, corrected**: the chart is NOT powered
 by `artifacts/preview` (that endpoint returns generic `score:1` filter
 scores, not metric values). The actual metric-chart endpoint is:
