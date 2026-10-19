@@ -114,7 +114,13 @@ endpoint exercised across the `ubiquity-*` skill family) and
      itself needs to directly reason over/summarize/analyze feed content
      (not just render a UI view), pull the raw corpus via the
      `/feeds/{id}/stream` endpoint -- full, untruncated content, no
-     1000-item display cap, filterable by date/text/entity.
+     1000-item display cap, filterable by date/text/entity. Some items
+     also carry a `media_assets` array (present only when the item's
+     source platform supports media capture) listing images/videos
+     attached to that item; a separate `GET /feeds/{id}/media/
+     {artifact_uuid}/{asset_id}` call resolves a stored asset to a
+     short-lived (~5 min) presigned download URL -- see
+     `ubiquity-data-feed-api` for the full field/status breakdown.
 
    Optional: **Pipeline Routing** (`ubiquity-pipeline-routing`) connects
    multiple pipelines' feeds together (useful when a question spans more

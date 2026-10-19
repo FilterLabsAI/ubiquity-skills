@@ -81,7 +81,22 @@ flowchart TD
     D --> E1["Ubi Chat\nsessions/messages,\ncites real artifacts,\nmetric-aware answers"]
     D --> E2["Data Browser\nmetrics/preview (chart)\nartifacts/preview (table)"]
     D --> E3["Direct Data Feed API\n/feeds/{id}/stream\n(full corpus, for Hermes-side\nreasoning/summarization)"]
+    E3 -.->|"item has media_assets[]\n(platform-dependent)"| E4["GET /feeds/{id}/media/\n{artifact_uuid}/{asset_id}\n-> presigned URL, ~5 min TTL"]
     E1 & E2 & E3 --> F["User gets an answer\n/ makes a decision"]
+```
+
+## 4b. Media asset retrieval (stream API items with attached media)
+
+```mermaid
+flowchart TD
+    A["GET /feeds/{id}/stream item"] --> B{"media_assets[]\npresent?"}
+    B -- "No (key absent,\nnot an empty array)" --> C["No media for this item --\nnothing further to fetch"]
+    B -- Yes --> D{"Per-asset status"}
+    D -->|stored| E["GET /feeds/{feed_id}/media/\n{artifact_uuid}/{asset_id}"]
+    D -->|failed| F["source_url only, no bytes --\nnot retrievable via media endpoint\n(404 'Media not found' if tried)"]
+    D -->|unavailable_logged_out| G["video needing an authenticated\nsession to serve -- only duration_s\nknown, not retrievable\n(404 'Media not found' if tried)"]
+    E --> H["200: {asset_id, kind, mime, bytes,\nurl (presigned, ~5 min TTL),\nexpires_at}"]
+    H --> I["Plain GET on url --\nno auth needed, serves raw bytes\n(fetch before expires_at)"]
 ```
 
 ## 5. Multi-pipeline routing (large/geographically broad queries)
