@@ -159,18 +159,16 @@ URL). To actually retrieve a stored asset's bytes, call:
 GET /api/locations/api/v1/feeds/{feed_id}/media/{artifact_uuid}/{asset_id}
 Authorization: Bearer <token>
 ```
-`{feed_id}` is the same numeric feed id used by `/stream` above (NOT
-optional -- a plain `/api/locations/api/v1/media/{artifact_uuid}/{asset_id}`
-with no feed segment 404s with a genuine backend "404 page not found",
-confirmed by checking it returns the Go router's own 404 rather than the
-SPA's HTML shell). `{artifact_uuid}` is the stream item's own `uuid`
-field (NOT `entity_id`); `{asset_id}` is the `media_assets` entry's
-`asset_id`. The endpoint also validates that the artifact actually
-belongs to the given feed -- requesting the right `artifact_uuid`/
-`asset_id` pair against the WRONG `feed_id` returns `404
-{"error": "Artifact not found"}` (confirmed by requesting against an
-unrelated feed that doesn't contain that artifact), and a `feed_id` that
-doesn't exist at all returns `400 {"error": "Feed not found"}`.
+`{feed_id}` is the same numeric feed id used by `/stream` above and is
+NOT optional -- it must be included in the path exactly as shown.
+`{artifact_uuid}` is the stream item's own `uuid` field (NOT
+`entity_id`); `{asset_id}` is the `media_assets` entry's `asset_id`. The
+endpoint also validates that the artifact actually belongs to the given
+feed -- requesting the right `artifact_uuid`/`asset_id` pair against the
+WRONG `feed_id` returns `404 {"error": "Artifact not found"}` (confirmed
+by requesting against an unrelated feed that doesn't contain that
+artifact), and a `feed_id` that doesn't exist at all returns `400
+{"error": "Feed not found"}`.
 
 `200` response (confirmed live) -- metadata plus a **short-lived
 presigned URL**, not the file bytes directly:
@@ -200,13 +198,12 @@ count matching the `bytes` field exactly).
   found"}`. Check `status == "stored"` on the `media_assets` entry
   (from `/stream`) BEFORE calling this endpoint, rather than treating a
   404 here as a transient/retryable failure.
-- Don't guess at a path shape -- several plausible-looking variants
-  (`/api/locations/api/v1/media/...`, `/api/locations/v1/media/...`,
-  paths without the `feeds/{feed_id}/` segment) either hit the SPA's
-  catch-all route (returns `200 text/html`, the Angular app shell -- NOT
-  a real API response, easy to mistake for success if you don't check
-  `Content-Type`) or a genuine backend 404. The confirmed-correct shape
-  always includes `feeds/{feed_id}/media/...`.
+- Don't guess at a path shape -- any variant omitting the
+  `feeds/{feed_id}/` segment either hits the SPA's catch-all route
+  (returns `200 text/html`, the Angular app shell -- NOT a real API
+  response, easy to mistake for success if you don't check
+  `Content-Type`) or a genuine backend 404. Always use the exact,
+  confirmed shape shown above.
 - This endpoint was not found exposed anywhere in the current Understand
   tab UI (the Feed Data Artifacts table's "View" action just opens the
   artifact's original source `url`, with no indication a stored media
