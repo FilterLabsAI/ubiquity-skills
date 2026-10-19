@@ -460,6 +460,20 @@ Example output (real data, Germany pipeline, Sentiment metric chosen):
 | 3 | 2026-09-29 00:00:00  | Bidirektionales Laden: Experte erklärt…  | Gehört haben wohl vor allem E-Autofahrer ...   | 1.00   | N/A    |
 ```
 
+## Enabling Ubi does not make content appear immediately
+Flipping the feed's refresh interval away from "Do Not Update" (see PUT
+above) does NOT synchronously ingest anything -- it schedules/kicks off
+an ASYNC sync of the feed's current entities, and `GET
+/api/understand/artifacts/count/<feed_id>` can read `0` for a noticeable
+window afterward (observed: still `0` immediately after a successful PUT
+that set `refresh_interval.Valid: true`). Don't treat an immediate `0`
+right after enabling as a sign something is broken -- poll
+`artifacts/count` every 60s or so (background poll, not a blocking wait)
+and expect it can take tens of minutes before the first artifacts land,
+since the sync still has to actually crawl/fetch each entity's source
+URLs before anything is indexed. Tell the user to expect this lag rather
+than implying enabling Ubi = instant data.
+
 ## Pitfalls
 - The Understand tab is largely non-functional (shows a "Collecting
 data..." blocking banner) until the pipeline's discovery job has completed
