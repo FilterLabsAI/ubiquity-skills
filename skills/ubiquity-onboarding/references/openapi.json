@@ -2,12 +2,13 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Ubiquity (FilterLabs) -- endpoints exercised by the ubiquity-* skill family",
-    "version": "1.6.0",
+    "version": "1.7.0",
     "description": "OpenAPI 3.0 spec for the ubiquity-* skill family (ubiquity-auth, ubiquity-pipeline-creation, ubiquity-entity-review, ubiquity-discovery-jobs, ubiquity-agent-settings, ubiquity-metric-generators, ubiquity-understand-layer, ubiquity-ubi-chat, ubiquity-pipeline-routing, ubiquity-pipeline-sharing, ubiquity-data-feed-api), reverse-engineered from live traffic. Developed for use by agentic systems operating Ubiquity programmatically, not as a human-facing reference -- NOT an official spec. Confirmed behaviors, caveats, and known bugs are documented inline on the relevant path/schema below rather than in a changelog; confirm against the live backend before depending on anything not explicitly marked CONFIRMED."
   },
   "servers": [
     {"url": "https://ubiquity.filterlabs.ai/api", "description": "Reverse-proxied backend (locations / orchestrator / understand services)"},
-    {"url": "https://auth.filterlabs.ai", "description": "Keycloak auth server (realm filter-labs-web, client web-app)"}
+    {"url": "https://auth.filterlabs.ai", "description": "Keycloak auth server (realm filter-labs-web, client web-app)"},
+    {"url": "https://agents.ubiquity.filterlabs.ai", "description": "Self-serve trial/preview signup site ('Ubiquity for Agents'), hosted alongside the ubiquity-scout service. See ubiquity-trial-signup."}
   ],
   "components": {
     "securitySchemes": {
@@ -16,6 +17,25 @@
   },
   "security": [{"bearerAuth": []}],
   "paths": {
+    "/api/v1/signup": {
+      "post": {
+        "summary": "Create a new trial/preview account (agents.ubiquity.filterlabs.ai server only, not the main backend). CONFIRMED on the wire: unauthenticated, no Bearer token needed. See ubiquity-trial-signup.",
+        "security": [],
+        "requestBody": {"content": {"application/json": {"schema": {"type": "object", "required": ["email"], "properties": {
+          "email": {"type": "string", "format": "email"},
+          "first_name": {"type": "string", "description": "optional -- omitted from the request body entirely when left blank, not sent as an empty string"},
+          "last_name": {"type": "string", "description": "optional, same omit-if-blank behavior as first_name"}
+        }}}}},
+        "responses": {"200": {"description": "{user_id, email, created, licensed, invited}. created/invited are both true only on a genuinely new signup -- CONFIRMED idempotent: re-submitting an email that already has an account returns the SAME user_id with created=false, invited=false (does not resend the invite email or create a duplicate). No email deliverability/domain-existence check is performed server-side -- a syntactically valid but undeliverable address is created identically to a real one."}}
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health check for the signup site's backend (agents.ubiquity.filterlabs.ai server only). CONFIRMED live: reports the underlying service name as 'ubiquity-scout' -- the signup API is hosted as part of the Scout search service, not a standalone microservice.",
+        "security": [],
+        "responses": {"200": {"description": "{status, service: 'ubiquity-scout', auth_disabled, hermes:{...}, twitter:{configured}, license:{role,enforced}, signup:{configured}, usage:{daily_limit,backend}}"}}
+      }
+    },
     "/realms/filter-labs-web/protocol/openid-connect/token": {
       "post": {
         "summary": "Login / token refresh (Keycloak ROPC + refresh_token grants)",
