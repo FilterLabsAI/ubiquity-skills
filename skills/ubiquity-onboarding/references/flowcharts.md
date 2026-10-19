@@ -128,3 +128,18 @@ flowchart TD
     D --> E["PUT /locations/v1/permissions/\npipeline/{pipeline_id}/{email}\n{ability: 'write'}\n(Edit auto-implies View in the UI;\nonly ONE PUT fires either way)"]
     E --> F["GET /locations/v1/permissions/\npipeline/{pipeline_id}\n(verify the grant landed)"]
 ```
+
+## 7. New trial account signup (agents.ubiquity.filterlabs.ai)
+
+```mermaid
+flowchart TD
+    A["Fill signup form: Email (required),\nFirst/Last name (optional)"] --> B["POST /api/v1/signup\n(unauthenticated, no Bearer token)"]
+    B --> C{"Email already\nhas an account?"}
+    C -- No --> D["created:true, licensed:true,\ninvited:true -- new Keycloak\nuser provisioned"]
+    C -- "Yes (idempotent)" --> E["created:false, invited:false --\nSAME user_id returned,\nno duplicate, no re-sent email"]
+    D --> F["Password-setup email sent\n(no-reply@filterlabs.ai via SES)"]
+    F --> G["Link: auth.filterlabs.ai/.../\naction-token?key=<JWT>\n(UPDATE_PASSWORD + VERIFY_EMAIL,\nexpires in 3 days)"]
+    G --> H["User (human) clicks link,\nsets password in Keycloak's\nown hosted form"]
+    H --> I["Redirected to\nubiquity.filterlabs.ai, logged in"]
+    I --> J["ubiquity-auth --login\nnow usable for this account"]
+```

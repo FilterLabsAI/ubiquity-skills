@@ -17,6 +17,11 @@ endpoint exercised across the `ubiquity-*` skill family) and
 
 ## The 8-step workflow
 
+0. **Get an account, if you don't have one.** New accounts are
+   self-serve via the "Ubiquity for Agents" preview signup at
+   `agents.ubiquity.filterlabs.ai` -- a plain-text POST that provisions
+   a real account and emails a password-setup link. See
+   `ubiquity-trial-signup`.
 1. **Ask a data question in plain language.** e.g. "News and social media
    about renewable energy policy in Germany." No account setup beyond
    login is needed first -- see `ubiquity-auth`.
@@ -145,6 +150,7 @@ endpoint exercised across the `ubiquity-*` skill family) and
 
 | Step | Skill |
 |---|---|
+| Create a new trial account | `ubiquity-trial-signup` |
 | Login / tokens | `ubiquity-auth` |
 | Parse a question -> create a pipeline | `ubiquity-pipeline-creation` |
 | Choose/tune Agent Settings | `ubiquity-agent-settings` |
