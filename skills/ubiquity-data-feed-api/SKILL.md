@@ -62,8 +62,9 @@ Understand-layer skills, NOT the pipeline/search UUID).
       "scraped_at": "2026-10-01T17:07:20Z",
       "entity_id": "50655",
       "entity_type": "institution",
-      "authors": "deutsche-bank",   // NOT in the swagger definitions, seen live, string (sometimes empty)
-      "metrics": {"comments": 12, "likes": 193}  // NOT in swagger, seen on social/micro_blog items only (engagement counts); absent on article-type items
+      "authors": "deutsche-bank",   // string (sometimes empty)
+      "metrics": {"comments": 12, "likes": 193},  // seen on social/micro_blog items only (engagement counts); absent on article-type items
+      "media_assets": [ /* array, see 'media_assets field' section below -- present only when the source platform supports media capture, key absent otherwise */ ]
     }
   ],
   "pagination": {
@@ -75,11 +76,9 @@ Understand-layer skills, NOT the pipeline/search UUID).
   }
 }
 ```
-The swagger's `definitions.qdrant.StreamItem` schema is INCOMPLETE --
-`authors`, `metrics`, and `media_assets` (see below) are real fields
-returned live that aren't listed in the swagger file. Don't treat the
-swagger definitions as exhaustive; prefer a live sample call when
-building anything that depends on exact field presence.
+This response shape (the `StreamItem` schema) is now fully documented
+here -- `authors`, `metrics`, and `media_assets` are all confirmed live
+fields with their presence/shape rules spelled out above and below.
 
 ## `media_assets` field -- CONFIRMED live, new as of this testing pass (2026-10-19)
 Some stream items carry a `media_assets` array -- a list of images/videos
