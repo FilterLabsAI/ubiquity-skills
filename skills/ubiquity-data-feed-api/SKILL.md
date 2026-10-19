@@ -62,8 +62,9 @@ Understand-layer skills, NOT the pipeline/search UUID).
       "scraped_at": "2026-10-01T17:07:20Z",
       "entity_id": "50655",
       "entity_type": "institution",
-      "authors": "deutsche-bank",   // NOT in the swagger definitions, seen live, string (sometimes empty)
-      "metrics": {"comments": 12, "likes": 193}  // NOT in swagger, seen on social/micro_blog items only (engagement counts); absent on article-type items
+      "authors": "deutsche-bank",   // string (sometimes empty)
+      "metrics": {"comments": 12, "likes": 193},  // seen on social/micro_blog items only (engagement counts); absent on article-type items
+      "media_assets": [ /* array, see 'media_assets field' section below -- present only when the source platform supports media capture, key absent otherwise */ ]
     }
   ],
   "pagination": {
@@ -75,11 +76,138 @@ Understand-layer skills, NOT the pipeline/search UUID).
   }
 }
 ```
-The swagger's `definitions.qdrant.StreamItem` schema is INCOMPLETE --
-`authors` and `metrics` are real fields returned live that aren't listed
-in the swagger file. Don't treat the swagger definitions as exhaustive;
-prefer a live sample call when building anything that depends on exact
-field presence.
+This response shape (the `StreamItem` schema) is now fully documented
+here -- `authors`, `metrics`, and `media_assets` are all confirmed live
+fields with their presence/shape rules spelled out above and below.
+
+## `media_assets` field -- CONFIRMED live, new as of this testing pass (2026-10-19)
+Some stream items carry a `media_assets` array -- a list of images/videos
+the original post had, now archived by the backend. **Whether an item
+gets this field depends on the SOURCE PLATFORM supporting media capture,
+not on anything about the feed/pipeline/topic itself** -- the array will
+be present and populated if the platform the item was scraped from
+supports it, and simply absent (not an empty array -- the key doesn't
+exist at all) on platforms/source types that don't. Confirmed via a live
+test feed with a platform mix that included media-capable sources: of
+525 sampled items, 105 (~20%) had a non-empty `media_assets` array;
+every one of the remaining 415 items (ordinary article/static-page
+source types) had NO `media_assets` key at all. **Always check for the
+key's presence with `.get("media_assets")` rather than assuming it's
+always there** -- which source types/platforms currently support it is
+an implementation detail of the scraper that can expand over time
+without notice; don't hardcode an allow-list of "which sources get this
+field" into calling code.
+
+Each array entry (confirmed fields, not all present on every entry):
+```json
+{
+  "asset_id": "<uuid>",
+  "position": 0,                        // 0-indexed order within the post; multi-image posts seen with up to 10 (positions 0-9)
+  "kind": "image",                      // confirmed values: "image", "video", "thumbnail"
+  "status": "stored",                   // confirmed values: "stored", "failed", "unavailable_logged_out"
+  "source_url": "https://.../original-file...",  // original platform/CDN URL; present on stored+failed, absent when unavailable_logged_out
+  "storage_key": "<platform>/<account>/<post_id>/0_image.jpg",  // internal archive path; present only when status=stored
+  "sha256": "<hex>",                    // present only when status=stored
+  "mime": "image/jpeg",                 // present only when status=stored
+  "bytes": 85812,                       // present only when status=stored
+  "duration_s": 48                      // video-only, seen even when status=unavailable_logged_out (duration known without the file itself)
+}
+```
+`kind` distribution observed: `image` (202), `video` (10), `thumbnail`
+(10) -- a `video` entry is frequently paired with a separate `thumbnail`
+entry (same `position`) when the video itself couldn't be archived, so
+a caller wanting "a representative image for this post" should prefer
+a `thumbnail`/`image` entry over assuming every post with video media
+has a playable video asset.
+
+`status` meanings (inferred from the field combinations observed, not
+from documentation):
+- `stored`: the asset was successfully downloaded and archived --
+  `storage_key`/`sha256`/`mime`/`bytes` all populated, and this is the
+  only status the media-retrieval endpoint below will actually serve.
+- `failed`: an attempt was made but the file could not be retrieved --
+  only `source_url` present (the original platform URL, which may
+  itself still be dead/blocked). No bytes archived.
+- `unavailable_logged_out`: seen on VIDEO assets from a source platform
+  that requires an authenticated/logged-in session to serve the video
+  file at all, so no `source_url` or stored copy exists, only
+  `duration_s` (metadata the scraper could read without fetching the
+  file). Confirmed only on `kind: "video"` so far; not observed on
+  `image`/`thumbnail`.
+
+**Practical implication**: don't assume a `stored` status or a usable
+asset just because `media_assets` is present and non-empty -- check
+`status` per-asset before trying to retrieve/display/download anything.
+For a quick "does this post have real media" check, filter for
+`status == "stored"` specifically; `failed`/`unavailable_logged_out`
+entries 404 against the retrieval endpoint below (confirmed, see
+Pitfalls there).
+
+This is a recent backend addition (first confirmed live on this date) --
+older feeds predating the change should be spot-checked rather than
+assumed to retroactively have `media_assets` on their already-ingested
+items; this was NOT independently tested (no re-ingestion was triggered
+on an older feed to see if historical items get backfilled vs. only new
+scrapes going forward getting the field).
+
+## Media retrieval endpoint -- CONFIRMED live, new as of this testing pass (2026-10-19)
+A `media_assets` entry does NOT embed a directly-fetchable file URL for
+stored assets (`storage_key` is an internal archive path, not a public
+URL). To actually retrieve a stored asset's bytes, call:
+```
+GET /api/locations/api/v1/feeds/{feed_id}/media/{artifact_uuid}/{asset_id}
+Authorization: Bearer <token>
+```
+`{feed_id}` is the same numeric feed id used by `/stream` above and is
+NOT optional -- it must be included in the path exactly as shown.
+`{artifact_uuid}` is the stream item's own `uuid` field (NOT
+`entity_id`); `{asset_id}` is the `media_assets` entry's `asset_id`. The
+endpoint also validates that the artifact actually belongs to the given
+feed -- requesting the right `artifact_uuid`/`asset_id` pair against the
+WRONG `feed_id` returns `404 {"error": "Artifact not found"}` (confirmed
+by requesting against an unrelated feed that doesn't contain that
+artifact), and a `feed_id` that doesn't exist at all returns `400
+{"error": "Feed not found"}`.
+
+`200` response (confirmed live) -- metadata plus a **short-lived
+presigned URL**, not the file bytes directly:
+```json
+{
+  "asset_id": "<uuid>",
+  "kind": "image",
+  "mime": "image/jpeg",
+  "bytes": 194959,
+  "url": "https://<storage-bucket>.s3.<region>.amazonaws.com/<storage_key>?X-Amz-Algorithm=...&X-Amz-Expires=300&...",
+  "expires_at": "2026-10-19T16:54:22Z"
+}
+```
+Confirmed live: the `url` is a presigned S3 GET URL with a **5-minute
+TTL** (`X-Amz-Expires=300`, matching the gap between `expires_at` and the
+response's own timestamp) -- fetch it promptly, don't cache/reuse it past
+`expires_at`, and don't persist it as if it were a stable link. A plain
+unauthenticated `GET` on the returned `url` (no Bearer token needed --
+it's a presigned S3 URL, auth is embedded in the query string) was
+confirmed to return the real file (`200`, correct `Content-Type`, byte
+count matching the `bytes` field exactly).
+
+**Pitfalls**:
+- Only `status: "stored"` assets are servable -- confirmed live, calling
+  this endpoint with the `artifact_uuid`/`asset_id` of a `failed` or
+  `unavailable_logged_out` entry both return `404 {"error": "Media not
+  found"}`. Check `status == "stored"` on the `media_assets` entry
+  (from `/stream`) BEFORE calling this endpoint, rather than treating a
+  404 here as a transient/retryable failure.
+- Don't guess at a path shape -- any variant omitting the
+  `feeds/{feed_id}/` segment either hits the SPA's catch-all route
+  (returns `200 text/html`, the Angular app shell -- NOT a real API
+  response, easy to mistake for success if you don't check
+  `Content-Type`) or a genuine backend 404. Always use the exact,
+  confirmed shape shown above.
+- This endpoint was not found exposed anywhere in the current Understand
+  tab UI (the Feed Data Artifacts table's "View" action just opens the
+  artifact's original source `url`, with no indication a stored media
+  asset exists) -- it is presently API-only; don't expect a UI
+  affordance for it yet.
 
 ## Pitfalls
 - **Bad/future `published_at` dates observed on Wikipedia-sourced items**:
