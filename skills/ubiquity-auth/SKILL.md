@@ -169,7 +169,58 @@ can render blank for a few seconds while JS re-renders -- if `page_info()`/
 re-check before assuming something broke; a hard `goto_url(current url)` +
 `wait_for_load()` reliably recovers it.
 
-## Usage notes / pitfalls
+## Scripting tip: prefer `curl` via `terminal`/shell over Python's `urllib`/`requests`
+Confirmed live: direct `urllib.request` calls against
+`ubiquity.filterlabs.ai` from a plain Python process can hang/timeout on
+the TLS read (`socket.timeout: The read operation timed out`) even with a
+correct User-Agent header set -- same request via `curl` from a shell
+succeeds instantly. If scripting outside `browser_exec` (e.g. from
+`execute_code`'s persistent kernel), shell out to `curl` rather than using
+an in-process HTTP client:
+```python
+from hermes_tools import terminal
+import json
+
+def api_call(method, path, body=None):
+    cmd_body = f"-d {json.dumps(json.dumps(body))}" if body is not None else ""
+    cmd = f'''
+TOKEN=$(cat /tmp/ubi_token.txt)
+curl -sS -m 60 -X {method} "https://ubiquity.filterlabs.ai{path}" \\
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
+  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \\
+  {cmd_body} -o /tmp/ubi_api_resp.json -w "HTTP_STATUS:%{{http_code}}\\n"
+'''
+    out = terminal(cmd)['output']
+    status = out.split("HTTP_STATUS:")[-1].strip()
+    with open('/tmp/ubi_api_resp.json') as f:
+        content = f.read()
+    try: return json.loads(content), status
+    except Exception: return content, status
+```
+Write the token to a scratch file once (`get_access_token()` from this
+skill's script) and have the shell command read it from there -- avoids
+re-embedding a long JWT into every shell command string, and survives
+`execute_code` kernel resets (which lose Python variables but not files
+on disk) better than keeping the token only in a Python variable. Avoid
+dumping large JSON responses directly to stdout through this path too --
+redirect to a file (`-o /tmp/....json`) and read it back with `read_file`/
+`json.load`, since very long single-line JSON piped through multiple
+tool-call layers has been observed getting mangled/truncated strangely
+(e.g. a `JSONDecodeError` or an silently truncated-looking printed string)
+when printed inline instead.
+
+## `execute_code`'s persistent kernel is NOT durable across agent-side resets
+If a background job notification or other event causes the agent's own
+turn-handling to restart, `execute_code`'s "persistent" Python kernel can
+reset silently (variables defined in a previous call raise `NameError` as
+if the session were fresh) even though the tool's own docs describe it as
+persisting across calls. Don't assume a helper function or token variable
+defined earlier in the conversation is still live after a long gap
+(especially one spanning a background `terminal` job's completion
+notification) -- cheaply re-define small helpers (the `api_call` function
+above, a token refresh) at the start of a new code block rather than
+assuming continuity, and persist anything that must survive (like the
+access token) to a file on disk, not just a kernel variable.
 - Never type a password into the browser login form yourself and never ask
   for one in chat.
 - CONCURRENCY: safe to reuse one token file across many parallel scripts;

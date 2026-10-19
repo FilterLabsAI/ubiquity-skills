@@ -320,6 +320,64 @@ whether a true continent/region-level location entity exists in
 Ubiquity's location database that could be added as a single clean entry
 instead of 27 individual countries.
 
+## CONFIRMED: there is no working "global/worldwide" location, and jobs/create requires a real location_uuid
+`POST /api/orchestrator/search/unified` accepts a query with NO location
+term (e.g. just a topic, no place name) and returns `location: null` --
+this parses fine and is useful for inspecting topic/entity_type
+extraction in isolation, but **`POST /api/orchestrator/api/v1/jobs/create`
+returns a bare `500 Internal Server Error` (no JSON body, just the text
+"Internal Server Error") when `location_uuid` is `null` or omitted** --
+confirmed live, tried both explicit `null` and omitting the key entirely,
+both 500. A location is a hard requirement to actually launch discovery,
+even though pipeline/feed/saved-search creation (steps 3a-3c) all accept
+a null `location_uuid` without complaint -- the failure only surfaces at
+job-create time (3e), potentially well after the user thinks the pipeline
+is fully set up.
+
+**Words like "worldwide"/"global"/"international"/"Earth" don't help --
+they geocode to a literal POI/business with that name** (confirmed:
+"worldwide" -> "One Worldwide Plaza" office building in NYC, a few-
+hundred-meter bounding box), same failure mode as the supranational-
+org bug already documented above. **Continent names have the exact same
+problem**, confirmed live for all six: "Asia" -> a themed area in Disney's
+Animal Kingdom (Bay Lake, FL, USA); "Europe" -> a street called "l'Europe"
+in Paris; "North America" -> resolves acceptably (`Combined--United
+States-Canada`, a real multi-country combined location, country reported
+as "United States"); "South America" -> a street in Noble Township,
+Indiana, USA; "Africa" -> silently resolves to just "South Africa" (the
+country, not the continent); "Oceania" -> a neighborhood called
+"Oceania" in Itagibá, Brazil. Only "North America" came back even
+plausibly continent-shaped by accident; the other five are the same
+street/POI-collision bug as the EU/UN/NATO cases. `GET
+/api/locations/v1/locations?q=<term>` also doesn't help here -- querying
+"Global"/"Earth"/"International"/"World" all return the exact SAME top-5
+unrelated results (Mexican cities, a Canadian province, the ASEAN HQ,
+Abuja Nigeria) regardless of query text, meaning the search isn't even
+text-matching sensibly for these terms -- there is no real "World"/
+"Global" entry in Ubiquity's location database to fall back to.
+
+**Practical options for a user who wants genuinely global/worldwide
+coverage** (there is no single-call fix):
+1. **Pick one real anchor country/location as a practical proxy** (e.g.
+   "United States") and tell the user explicitly that this is NOT
+   literally global coverage, just a workable single-location stand-in --
+   cheapest to set up, lowest fidelity.
+2. **Add multiple real countries as a combined multi-location** (see
+   "Multiple locations on one pipeline" below) spanning the regions the
+   user actually cares about -- subject to the same ~19-20-location
+   persistence ceiling and the 10%-of-max_queries query-starvation
+   tradeoff documented below.
+3. **Split into several regional pipelines** (e.g. Americas / Europe-
+   Africa / Asia-Pacific), each anchored on a few real countries, routed
+   together via Pipeline Routes (`ubiquity-pipeline-routing`) into one
+   aggregating feed -- most setup, best per-region query coverage, avoids
+   the persistence ceiling on any single pipeline.
+Always surface this limitation and ask the user to pick an option via
+`clarify` rather than silently substituting a country/region without
+telling them -- "global" framed by the user and "United States" (or any
+other substitution) delivered without comment are materially different
+scopes.
+
 ## Rule of thumb: when to split into multiple pipelines + route them
 For a large number of geographic areas, don't default to cramming them
 all into one pipeline's location list -- consider creating SEPARATE

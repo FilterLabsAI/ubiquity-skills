@@ -164,6 +164,45 @@ confirmed; the page likely filters client-side via its Location dropdown)
 and shows Status/Type/Location/Progress/Created/Updated/Results columns
 for every job on the account.
 
+## Decoding `result_data` on a completed job -- CONFIRMED
+A `completed` job's `result_data` field is base64-encoded JSON (decode
+with `base64.b64decode(...).decode()`), NOT present/meaningful while
+`status` is still `pending`/`running`. Real example (a US-anchored
+discovery job, default Low coverage):
+```json
+{
+  "stats": {
+    "pipeline_type": "parallel_children",
+    "children_spawned": 20, "children_completed": 20, "children_failed": 0,
+    "child_errors": [],
+    "sources_discovered": 452, "sources_evaluated": 416,
+    "sources_valid": 135, "sources_stored": 106
+  },
+  "async_pending": 11,
+  "async_completed": {"completed_by": "cronjob_safety_net", "failed_count": 6, "processed_count": 84}
+}
+```
+This confirms discovery jobs are managed internally and may fan out into
+parallel CHILD jobs (`pipeline_type: "parallel_children"`, 20 in this one
+observed case) in order to conduct discovery work in parallel, rather than
+always running as a single monolithic search -- `children_spawned`/
+`children_completed`/`children_failed` track that fan-out when it happens.
+`sources_discovered` ->
+`sources_evaluated` -> `sources_valid` -> `sources_stored` is the real
+funnel (here: 452 raw candidates found, 416 actually evaluated, 135 passed
+quality checks, 106 landed as new entities on the feed -- the discrepancy
+between `sources_valid` (135) and `sources_stored` (106) is normal, likely
+dedup against sources the feed already had). `async_completed.completed_by:
+"cronjob_safety_net"` reveals there's a background cron job that mops up
+straggler async work (here it finished 84 of the pending async items and
+6 failed) -- i.e. some of the "evaluation" work for a discovery job
+continues asynchronously even after the job's own `status` flips to
+`completed`/`progress: 100`; `async_pending` (11 here) is work still
+queued even post-completion. Don't assume `sources_stored` is final the
+moment `status` becomes `completed` -- a few more entities can still land
+via the async safety net afterward. Use this breakdown when explaining a
+job's outcome to a user instead of just reporting `status: completed`.
+
 ## Terminal statuses -- IMPORTANT, more than just completed/failed/cancelled
 A job's `status` can also land on **`partial_failure`** as a genuine
 TERMINAL state -- confirmed live: a job reached `progress: 100`,
