@@ -25,10 +25,17 @@ Scripts live in `scripts/` of this skill and are self-contained (Python 3
 stdlib only, no deps):
 
 ```
-python3 scripts/filterlabs_auth.py --login "email@example.com" "password"
+python3 scripts/filterlabs_auth.py --login "email@example.com"
 ```
 
-Stores tokens at `~/.hermes/secrets/filterlabs_tokens.json` (chmod 600).
+The script prompts for the password without echo (or reads one line from
+stdin with `--password-stdin`). It never accepts the password as a
+command-line argument, because arguments are visible to other local users in
+`ps` / `/proc/<pid>/cmdline` and land in shell history.
+
+Stores tokens at `~/.hermes/secrets/filterlabs_tokens.json`. The file is
+written atomically (temp file, then rename) and is owner-only (0600) from the
+moment it is created; the `secrets` folder is created 0700.
 Never persists the raw password. All later calls (CLI or library) use this
 file automatically.
 
@@ -43,8 +50,8 @@ running `--login` with them directly -- that was wrong and must not be
 followed; `clarify`-collected text is still chat, and a password must
 never transit chat or be typed by the agent. Options, in order of
 preference:
-  1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>
-     <password>` themselves**, in their OWN terminal, outside the agent's
+  1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>`
+     themselves**, in their OWN terminal, outside the agent's
      tool-calling loop entirely -- the agent never sees the password. The
      agent should name the exact command (substituting the user's real
      email) and ask the user to run it; it just cannot execute it with
@@ -79,8 +86,17 @@ preference:
 CLI:
 ```
 python3 scripts/filterlabs_auth.py                # prints a valid access token
-python3 scripts/filterlabs_auth.py --status        # prints expiry countdowns
-python3 scripts/filterlabs_auth.py --login E P     # first-time / re-login
+python3 scripts/filterlabs_auth.py --status        # prints expiry countdowns (no token)
+python3 scripts/filterlabs_auth.py --login EMAIL   # first-time / re-login; prompts for the password
+python3 scripts/filterlabs_auth.py --help          # usage (no token)
+```
+
+Only the bare invocation prints a token. `--help` prints usage, and any
+unknown argument exits with status 2 and usage instead of a token. Agents
+should prefer `--status` to check a login, and should never echo the token
+into their own output.
+
+```
 ```
 
 Library usage (from Python, including inside other skills' scripts):
@@ -223,7 +239,9 @@ assuming continuity, and persist anything that must survive (like the
 access token) to a file on disk, not just a kernel variable.
 - Never type a password into the browser login form yourself and never ask
   for one in chat.
-- CONCURRENCY: safe to reuse one token file across many parallel scripts;
-  `get_access_token()` refreshes idempotently (though a refresh rotates the
-  refresh_token, so avoid two processes refreshing at the exact same
-  instant -- in practice the 120s leeway window makes races rare).
+- CONCURRENCY: safe to reuse one token file across many parallel scripts.
+  A refresh rotates the refresh_token, so `get_access_token()` serialises
+  refreshes with an exclusive lock on `<token file>.lock` and re-reads the
+  file once it holds the lock; a second process that was waiting simply
+  picks up the token the first one just saved. (The lock uses `fcntl`, so
+  it is POSIX-only; on Windows run one refreshing process at a time.)
