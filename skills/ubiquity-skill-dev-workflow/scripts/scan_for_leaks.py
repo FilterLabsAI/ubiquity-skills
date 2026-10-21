@@ -36,7 +36,16 @@ PATTERNS = [
     ("aws_access_key_id", "high",
      re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
     ("generic_secret_assignment", "high",
-     re.compile(r"(?i)\b(password|passwd|pwd|api[_-]?key|secret|access[_-]?token|client[_-]?secret)\b\s*[:=]\s*[\"']?[A-Za-z0-9_\-/+=]{8,}[\"']?")),
+     # Optional closing quote after the key so JSON bodies ("password": "...")
+     # match as well as code (password = "..."); `token` and refresh/id
+     # tokens are included because SKILL.md promises token="..." is caught.
+     re.compile(r"(?i)\b(password|passwd|pwd|api[_-]?key|secret|client[_-]?secret|"
+                r"(?:access|refresh|id)?[_-]?token)\b[\"']?\s*[:=]\s*"
+                # value: a quoted literal, or an unquoted run containing a
+                # digit that is not a call/attribute/subscript (so code like
+                # `token = get_access_token()` is not flagged)
+                r"(?:[\"'][A-Za-z0-9_\-/+=.]{8,}[\"']"
+                r"|[A-Za-z0-9_\-/+=]*\d[A-Za-z0-9_\-/+=]{7,}(?![\w.(\[]))")),
     ("email", "medium",
      re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
     ("uuid", "medium",

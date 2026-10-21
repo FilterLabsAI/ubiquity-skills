@@ -115,13 +115,19 @@ python3 scripts/scan_for_leaks.py <file_or_dir> [<file_or_dir> ...]
 ```
 It flags, with file:line and the matched snippet:
 - email addresses (e.g. `<ACCOUNT_EMAIL>`)
-- UUIDs (v1-v5, lowercase/uppercase/mixed) -- pipeline IDs, feed IDs,
-  entity IDs, location IDs, job IDs are ALL UUIDs in this system and are
-  environment-specific; they should not be hardcoded into shared docs
+- UUIDs (v1-v5, lowercase/uppercase/mixed) -- pipeline IDs, saved-search
+  IDs, location IDs and job IDs are UUIDs; they are environment-specific
+  and should not be hardcoded into shared docs. Feed IDs and entity/source
+  IDs are plain integers (e.g. `feed_id: 1234`), which the scanner does NOT
+  flag because bare numbers are everywhere in normal text; check those by
+  eye and replace them with `<FEED_ID>` / `<ENTITY_ID>`
 - bearer tokens / JWTs (three base64url segments joined by `.`, or
   `Bearer <token>` strings)
-- generic API-key/secret/password/token assignments
-  (`password=`, `api_key:`, `secret =`, `token="..."`, etc.)
+- generic API-key/secret/password/token assignments, in code or JSON form
+  (`password=`, `api_key:`, `secret =`, `token="..."`,
+  `"refresh_token": "..."`, `"password": "..."`, etc.). Unquoted values are
+  only flagged when they contain a digit and are not a call, so code such
+  as `token = get_access_token()` is not reported
 - AWS-style access key IDs (`AKIA[0-9A-Z]{16}`)
 - PEM private key blocks (`-----BEGIN ... PRIVATE KEY-----`)
 - bare IPv4 addresses and internal-looking hostnames
