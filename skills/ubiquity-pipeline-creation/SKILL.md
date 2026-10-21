@@ -223,10 +223,12 @@ the UN, Brussels for NATO HQ) or the specific member countries the user
 actually cares about -- don't just reword the original organization name,
 that was confirmed not to help. If a discovery job is already running
 against the old (wrong) location when you fix it, remember the running
-job keeps going unaffected -- cancel it and launch a fresh one (see
-`ubiquity-discovery-jobs`) if you want the corrected location to actually
-produce new discovered sources, rather than assuming the fix alone
-retroactively corrects what's already in flight.
+job keeps going unaffected. Tell the user, and offer to cancel it and
+launch a fresh one (see `ubiquity-discovery-jobs`) if they want the
+corrected location to actually produce new discovered sources, rather
+than assuming the fix alone retroactively corrects what's already in
+flight. Ask before cancelling or launching; a fresh job is a new
+discovery run, so never do it automatically.
 
 ## Multiple locations on one pipeline
 A pipeline can target MORE than one location at once -- useful for a group
@@ -373,7 +375,8 @@ coverage** (there is no single-call fix):
    aggregating feed -- most setup, best per-region query coverage, avoids
    the persistence ceiling on any single pipeline.
 Always surface this limitation and ask the user to pick an option via
-`clarify` rather than silently substituting a country/region without
+`clarify` (or however your runtime asks the user; if you cannot ask, do
+not proceed) rather than silently substituting a country/region without
 telling them -- "global" framed by the user and "United States" (or any
 other substitution) delivered without comment are materially different
 scopes.
