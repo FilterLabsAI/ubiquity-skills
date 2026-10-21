@@ -1,6 +1,6 @@
 ---
 name: ubiquity-pipeline-routing
-description: Use to connect Ubiquity pipelines + egress to platforms.
+description: Use to connect one Filter / Ubiquity pipeline to another (routes) or to send feed data out to an external platform (egress). Confirm with the user before creating either.
 ---
 
 # Ubiquity: pipeline routing (pipeline-to-pipeline) and data egress

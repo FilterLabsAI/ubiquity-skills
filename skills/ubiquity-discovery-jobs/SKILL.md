@@ -1,6 +1,6 @@
 ---
 name: ubiquity-discovery-jobs
-description: Use to run/scale/cancel Ubiquity discovery jobs.
+description: Use to launch, check, scale up or cancel a Filter / Ubiquity discovery job, or to see which jobs are running. Discovery jobs are slow (tens of minutes) and costly, so check running jobs and ask the user before launching one.
 ---
 
 # Ubiquity: running, scaling, and cancelling discovery jobs

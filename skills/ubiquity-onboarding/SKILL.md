@@ -1,6 +1,6 @@
 ---
 name: ubiquity-onboarding
-description: New-user overview of the full Ubiquity workflow + diagrams.
+description: Start here for anything on Filter, FilterLabs or Ubiquity (ubiquity.filterlabs.ai). Explains the end-to-end workflow, from a plain-language question about news or social posts (Reddit, X, forums) to a monitored feed, and which ubiquity-* skill handles each step.
 ---
 
 # Ubiquity: new-user onboarding overview
@@ -15,7 +15,7 @@ Linked files: `references/openapi.json` (OpenAPI 3.0 spec for every
 endpoint exercised across the `ubiquity-*` skill family) and
 `references/flowcharts.md` (Mermaid diagrams of the end-to-end workflow).
 
-## The 8-step workflow
+## The workflow (steps 0-9)
 
 0. **Get an account, if you don't have one.** New accounts are
    self-serve via the "Ubiquity for Agents" preview signup at

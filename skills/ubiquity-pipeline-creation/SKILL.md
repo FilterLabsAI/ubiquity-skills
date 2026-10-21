@@ -1,6 +1,6 @@
 ---
 name: ubiquity-pipeline-creation
-description: Use to create Ubiquity pipelines via the Ubi discovery chat.
+description: Use to set up a Filter (FilterLabs Ubiquity) pipeline that monitors a topic in a place, for example news or Reddit and X posts about a subject. Covers parsing the query, the required location, saving the pipeline and launching discovery.
 ---
 
 # Ubiquity: creating a pipeline (discovery chat + agent settings + discovery job)
@@ -655,6 +655,20 @@ Content-Type: application/json
 {"metadata": {"discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25}}}
 ```
 `200`, returns the updated pipeline with `metadata.discovery_config` set.
+This partial body is only safe here because a pipeline fresh from 3c has
+`metadata: {}`. **The PATCH replaces `metadata` wholesale** (re-tested
+live 2026-10-21: PATCHing `{"metadata": {"discovery_config": {...}}}` onto
+a pipeline that already had `agent_config` returned `200` and the stored
+`metadata` then held only `discovery_config`; `agent_config` was gone).
+On any pipeline that already has settings, GET it first, change the
+fields you need inside the full `metadata` object, and PATCH all of it
+back:
+```
+GET /api/locations/v1/pipelines/<pipeline_id>          # read current metadata
+# modify metadata.discovery_config / metadata.agent_config locally
+PATCH /api/locations/v1/pipelines/<pipeline_id>
+{"metadata": <the complete, modified metadata object>}
+```
 
 **3e. Launch the discovery job:**
 ```
@@ -739,10 +753,16 @@ used for permissions, agent settings, and routing. Keep both.
 List pipelines: `GET /api/locations/v1/pipelines?limit=10&offset=0&order_by=created_at&order=DESC`
 (also filterable by `?saved_search_id=<uuid>&limit=300`).
 
-**CONFIRMED live backend bug: renaming a saved-search's `name` field
-alone fails server-side, while its OTHER fields PUT successfully on the
-same record.** `PUT`/`PATCH /api/locations/v1/saved-searches/<id>`
-consistently returns `500 {"error":"Failed to update saved search"}`
+**Saved-search rename: fixed as of 2026-10-21 testing.** A `PUT
+/api/locations/api/v1/saved-searches/{id}` with a new `name` (and
+`search_query`) returned `200` and a follow-up GET showed the new name.
+The history below is kept in case the bug comes back; if a rename
+returns `500` again, the notes still apply.
+
+**Earlier (before 2026-10-21): renaming a saved-search's `name` field
+alone failed server-side, while its OTHER fields PUT successfully on the
+same record.** `PUT`/`PATCH /api/locations/api/v1/saved-searches/{id}`
+consistently returned `500 {"error":"Failed to update saved search"}`
 when the body changes `name` -- tried every combination (name only, full
 body with search_query/search_filters/is_default all re-sent). This is
 NOT a sign the endpoint is broken generally: a PUT to the SAME record
@@ -808,10 +828,14 @@ jobs only (not the one already running). Fields:
   - `creativity_level`: `low` | `medium` | `high`.
   - `focus_types` (array, checkboxes): any of `news`, `government`, `blog`,
     `community`, `social`.
-  - `language_preference`: `native` (search only local language(s)) |
-    `mixed` (English + native) | `english` (English only). Use `native` for
-    non-English-dominant locations (China, Russia, etc.) to actually surface
-    local sources.
+  - `language_preference`: `native_first` (search mainly local language(s)) |
+    `mixed` (English + native) | `english_first` (mainly English), the
+    same enum as ubiquity-agent-settings and openapi.json. Use
+    `native_first` for non-English-dominant locations (China, Russia, etc.)
+    to actually surface local sources. **The server does not validate this
+    field:** in a live test (2026-10-21) a PATCH with `"native"` returned
+    `200` and stored `"native"` verbatim, so a typo is silently saved
+    rather than rejected. Double-check the spelling.
   - Custom Instructions: free-text extra requirements for query generation --
     CONFIRMED JSON key: `agent_config.search_generation.custom_instructions`
     (string). Seen live on a real pipeline:
@@ -866,12 +890,14 @@ Content-Type: application/json
       "datasets_discovery": {"enable_dataset_hunting": false,
         "providers": ["fred","world-bank","oecd","eurostat","imf"]}
     },
-    "discovery_config": {"max_queries": 15}
+    "discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25}
   }
 }
 ```
 `200 OK`, returns the full updated pipeline object. The whole `metadata`
-object is sent back as-is (not a partial diff) -- read the current pipeline
+object is sent back as-is (not a partial diff; confirmed live 2026-10-21:
+any top-level key you leave out of `metadata` is dropped, and keys you
+leave out of `discovery_config` are dropped too) -- read the current pipeline
 first, mutate the fields you want to change inside `metadata.agent_config`/
 `metadata.discovery_config`, and PATCH the complete `metadata` object back
 so you don't accidentally clobber unrelated settings. "Reset to Defaults"
@@ -879,10 +905,22 @@ and "Cancel" are also available in the UI (not yet captured, but Reset
 likely just re-PATCHes with the default values shown above).
 
 ## Pitfalls
-- A pipeline is only created once the user confirms **"Yes, Discover
-  Sources"** -- just typing a query and clicking "Build Pipeline" alone only
-  parses it and shows the confirmation chat; no pipeline/feed exists yet
-  until that confirmation.
+- Typing a query and clicking "Build Pipeline" alone only parses it and
+  shows the confirmation chat; no pipeline/feed exists yet. A pipeline is
+  created by either **"Save"** (no discovery job) or **"Yes, Discover
+  Sources"** (pipeline plus a discovery job); see Step 3 and the next
+  pitfall.
+- **Deleting a pipeline: undocumented, partial, owner-only.** In a live
+  test (2026-10-21) `DELETE /api/locations/v1/pipelines/{id}` on a
+  throwaway pipeline we had just created returned `204`, and the pipeline
+  disappeared from `GET /api/locations/v1/pipelines`. Its feed
+  (`GET /api/locations/api/v1/feeds/{feed_id}`) and saved search stayed
+  readable afterwards (no documented delete for either), and a `GET` on
+  the deleted pipeline id returned `500 {"error": "Failed to get
+  pipeline"}` rather than `404`. Only ever delete pipelines the user owns
+  and asked you to delete. To switch a pipeline off without deleting it,
+  set the feed's refresh to 0 ("Do Not Update", see
+  ubiquity-understand-layer) and leave its metric generators inactive.
 - Discovery jobs are genuinely slow (tens of minutes). Don't assume a job is
   stuck just because progress is still low after a minute or two.
 - **Pipeline creation is a 5-call sequence (saved-search -> feed ->

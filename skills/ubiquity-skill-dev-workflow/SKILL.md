@@ -1,6 +1,6 @@
 ---
 name: ubiquity-skill-dev-workflow
-description: Use before committing ubiquity-* skill changes to GitHub.
+description: Use before committing or pushing changes to the ubiquity-* (Filter / FilterLabs Ubiquity) skills repo. Runs the leak scan, a soundness review and a scrub of user-specific details.
 ---
 
 # Reviewing & committing changes to ubiquity-* skills
@@ -8,7 +8,8 @@ description: Use before committing ubiquity-* skill changes to GitHub.
 This skill governs how changes made to any `ubiquity-*` skill (or its
 supporting scripts/scratch artifacts intended for commit) get reviewed
 and pushed to the team's GitHub mirror repo:
-**https://github.com/FilterLabsAI/ubiquity-skills** (private).
+**https://github.com/FilterLabsAI/ubiquity-skills** (public: anyone can read it, and the
+signup page sends new users here, so treat every commit as published).
 
 **The local clone's path is NOT hardcoded** -- it's resolved once per
 machine via `scripts/repo_location.py` (see "Step -1" below) so the
@@ -141,7 +142,8 @@ Then ask the user, per finding (or in one batch), to choose:
   of the example;
 - **Keep as-is** -- only for things the user explicitly confirms are
   fine to publish (e.g. a UUID that's actually a public, non-sensitive
-  test fixture id, or this repo being private and the ID being low-risk);
+  test fixture id). The repo is public, so "the repo is private" is never
+  a reason to keep an ID;
 - **Remove the whole example/line** -- when redaction would make the
   surrounding text confusing or incomplete.
 Re-run the scanner after redacting until it comes back clean (or every
@@ -203,7 +205,7 @@ Steps 1 and 1.5 catch sensitive DATA and shaky REASONING, but neither
 catches a THIRD distinct failure mode: a worked example that reveals
 WHAT the user/org is actually investigating, searching for, or building
 -- even with no literal secret (no token, no UUID, no email) in it. This
-repo is public-ish within the org and anything merged to `main` is a
+repo is public and anything merged to `main` is a
 shared, long-lived artifact; a skill's job is to teach the MECHANISM
 (an API shape, a UI quirk, a bug), not to double as a diary of a real
 investigation, customer name, or business question. Scan every file

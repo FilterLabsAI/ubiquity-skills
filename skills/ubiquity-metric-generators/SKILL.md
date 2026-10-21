@@ -1,6 +1,6 @@
 ---
 name: ubiquity-metric-generators
-description: Use to create/view Ubiquity metric generators on a feed.
+description: Use to create, edit, view or delete custom scored metrics (sentiment, stance, entities, your own prompt) on a Filter / Ubiquity feed's posts and articles.
 ---
 
 # Ubiquity: metric generators

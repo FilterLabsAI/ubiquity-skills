@@ -1,6 +1,6 @@
 ---
 name: ubiquity-agent-settings
-description: Use to tune Ubiquity Agent Settings for discovery pipelines.
+description: Use to tune how a Filter / Ubiquity pipeline discovers and judges sources (social vs news focus, language, credibility threshold, query budget, custom instructions) before or between Ubiquity discovery jobs.
 ---
 
 # Ubiquity: recommending Agent Settings for a pipeline
