@@ -52,7 +52,10 @@ endpoint exercised across the `ubiquity-*` skill family) and
    retroactively. See `ubiquity-agent-settings` for the full read/write
    API calls plus a recommendation strategy by use case (news monitoring,
    social/sentiment, government/policy, economic data).
-4. **Run the discovery job and review entities.** Discovery is a slow
+4. **Run the discovery job and review entities.** Ask the user before
+   launching: a discovery job is never implied by a request to find
+   posts or set up a pipeline (see `ubiquity-pipeline-creation` step 3e
+   and `ubiquity-discovery-jobs`). Discovery is a slow
    agentic job (15-20+ min, sometimes longer); it searches, evaluates,
    and proposes candidate SOURCES ("entities") -- people, accounts,
    publications, outlets -- not individual pieces of content. Reviewing

@@ -659,7 +659,16 @@ Content-Type: application/json
 ```
 `200`, returns the updated pipeline with `metadata.discovery_config` set.
 
-**3e. Launch the discovery job:**
+**3e. Launch the discovery job (only after the user says yes):**
+
+Stop before this call and ask the user, stating the pipeline, the location
+it resolved to (and that a proxy location is a stand-in, if one is used),
+and the cost: one slow agentic job, 15 minutes to over an hour, one at a
+time per pipeline. Check running and pending jobs first
+(`ubiquity-discovery-jobs`). A request such as "find me posts about X" is
+not consent to launch a job. If you cannot ask the user, stop after 3d
+(the pipeline is saved and nothing is lost) and report what is ready.
+
 ```
 POST /api/orchestrator/api/v1/jobs/create
 Content-Type: application/json
