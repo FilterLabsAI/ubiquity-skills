@@ -21,10 +21,10 @@ Usage:
 `list` and `page` both support --sort-by {credibility,name,id}, --reverse
 (highest-first instead of lowest-first), and --only-unvoted (hide anything
 already liked/disliked/flagged, to focus a review pass on fresh entities).
-`page` additionally shows each entity's AI notes (a plain-language render
-of the discovery agent's structured credibility/quality/local_focus/type
-assessment -- there is no free-text "reasoning" field in the API, this is
-the closest equivalent) and its full list of source URLs.
+`page` additionally shows each entity's evaluation notes: the free-text
+reasoning from GET /source-evaluation-logs/by-url when one exists, else a
+plain-language render of the structured credibility/quality/local_focus/type
+fields.
 """
 import argparse
 import base64
@@ -38,13 +38,29 @@ from urllib import request, error, parse
 
 BASE_URL = "https://ubiquity.filterlabs.ai"
 TOKENS_PATH = Path.home() / ".hermes/secrets/filterlabs_tokens.json"
+HTTP_TIMEOUT = 120  # seconds; urllib's default is to wait forever
+PAGE_LIMIT = 500    # server page size used when walking the entity list
 # Session cache (frozen entity order for a review pass) -- not a secret,
 # just scratch state, kept near the tokens dir purely for convenience.
 SESSION_DIR = Path.home() / ".hermes/cache/entity_review_sessions"
 
 
 def _load_token():
+    """Return a valid access token. Prefer ubiquity-auth's get_access_token
+    (refreshes and locks); fall back to the raw file but refuse to send an
+    access token that has already expired, since every call would 401."""
+    auth = Path(__file__).resolve().parents[2] / "ubiquity-auth/scripts/filterlabs_auth.py"
+    if auth.exists():
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("filterlabs_auth", str(auth))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        mod.TOKEN_PATH = str(TOKENS_PATH)
+        return mod.get_access_token()
+    import time
     data = json.loads(TOKENS_PATH.read_text())
+    if data.get("access_expires_at", 0) <= time.time():
+        raise RuntimeError("Stored access token has expired; run filterlabs_auth.py to refresh.")
     return data["access_token"]
 
 
@@ -71,7 +87,7 @@ def _call(method, path, token, body=None):
     if body is not None:
         req.add_header("Content-Type", "application/json")
     try:
-        with request.urlopen(req) as resp:
+        with request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             raw = resp.read()
             return resp.status, (json.loads(raw) if raw else None)
     except error.HTTPError as e:
@@ -82,16 +98,25 @@ def _call(method, path, token, body=None):
             return e.code, raw.decode(errors="replace")
 
 
-def fetch_entities(token, feed_id, limit=500):
-    status, data = _call(
-        "GET",
-        f"/api/locations/api/v1/feeds/{feed_id}/entities"
-        f"?limit={limit}&offset=0&q=&order_by=vote&order=asc&type=all",
-        token,
-    )
-    if status != 200:
-        raise RuntimeError(f"entities fetch failed: {status} {data}")
-    return data["entities"], data.get("total"), data.get("source_count"), data.get("dataset_count")
+def fetch_entities(token, feed_id, limit=PAGE_LIMIT):
+    """Walk every page; a single limit=500 call silently dropped the rest."""
+    entities, offset, data = [], 0, {}
+    while True:
+        status, data = _call(
+            "GET",
+            f"/api/locations/api/v1/feeds/{feed_id}/entities"
+            f"?limit={limit}&offset={offset}&q=&order_by=vote&order=asc&type=all",
+            token,
+        )
+        if status != 200:
+            raise RuntimeError(f"entities fetch failed: {status} {data}")
+        page = data.get("entities") or []
+        entities.extend(page)
+        offset += len(page)
+        total = data.get("total")
+        if not page or (total is not None and offset >= total):
+            break
+    return entities, data.get("total"), data.get("source_count"), data.get("dataset_count")
 
 
 def fetch_votes(token, pipeline_id, limit=1000):
@@ -243,7 +268,13 @@ def apply_session(feed_id, pipeline_id):
         raise RuntimeError("No session found -- run `start` first.")
     results = []
     remaining_votes = {}
+    live = {(v["entity_id"], v["vote_type"]) for v in fetch_votes(token, pipeline_id)}
     for entity_id_str, vote_type in data.get("queued_votes", {}).items():
+        if (int(entity_id_str), vote_type) in live:
+            # vote:toggle is not idempotent; sending it would REMOVE the vote.
+            results.append({"entity_id": int(entity_id_str), "action": f"vote:{vote_type}",
+                            "status": "already-present", "ok": True})
+            continue
         status, resp = vote(token, pipeline_id, int(entity_id_str), vote_type)
         ok = status in (200, 201)
         results.append({"entity_id": int(entity_id_str), "action": f"vote:{vote_type}",
@@ -265,12 +296,11 @@ def apply_session(feed_id, pipeline_id):
 
 
 def _ai_notes(meta):
-    """Render the discovery agent's structured per-entity assessment as a
-    short plain-language note. There is NO free-text "reasoning" field in
-    the API -- the agent's judgment is captured only as these four
-    structured fields (credibility_score, quality, local_focus, type).
-    This renders them as one readable sentence, which is the closest thing
-    to an "AI reasoning" note the data actually supports."""
+    """Render the discovery agent's structured per-entity assessment
+    (credibility_score, quality, local_focus, type) as one plain-language
+    sentence. This is the fallback used when an entity has no evaluation
+    log: the free-text reasoning lives in GET
+    /source-evaluation-logs/by-url, which `page` fetches when it exists."""
     cred = meta.get("credibility_score")
     quality = meta.get("quality")
     local_focus = meta.get("local_focus")
@@ -594,12 +624,12 @@ def main():
     p_page.add_argument(
         "--table",
         action="store_true",
-        help="render as a plain-text grid table (ID/Name/Source URLs/Type/Notes/Vote status) "
-        "with full untruncated multi-line cells instead of long-form cards",
+        help="render as a markdown table (ID/Name/Source URLs/Type/Notes/Vote status), "
+        "one row per entity, instead of long-form cards",
     )
     p_page.add_argument(
         "--col-width", type=int, default=50,
-        help="wrap width for Name/Notes columns in --table mode (default 50; URLs are never wrapped)",
+        help="ignored; kept so existing commands still parse (the markdown renderer wraps cells)",
     )
 
     p_start = sub.add_parser(
@@ -648,7 +678,8 @@ def main():
     p_suggest.add_argument("--pipeline-id", required=True)
 
     args = ap.parse_args()
-    token = _load_token()
+    # queue / queue-remove only touch the local session file.
+    token = None if args.cmd in ("queue", "queue-remove") else _load_token()
 
     if args.cmd == "list":
         entities, total, source_count, dataset_count = fetch_entities(token, args.feed_id)
@@ -679,15 +710,19 @@ def main():
         if session:
             queued_votes = session.get("queued_votes", {})
             queued_removals = set(session.get("queued_removals", []))
-            ordered = [rows_by_id[i] for i in session["ids"]
-                       if i in rows_by_id and i not in queued_removals]
+            # The frozen id list IS the page order. --only-unvoted was already
+            # applied when `start` froze it; re-filtering here on queued or
+            # live votes would slide later entities into pages the reviewer
+            # has already read, so they would never be shown.
+            ordered = [rows_by_id[i] for i in session["ids"] if i in rows_by_id]
             for r in ordered:
                 qv = queued_votes.get(str(r["id"]))
                 if qv:
                     r["votes"] = sorted(set(r["votes"]) | {qv})
                     r["queued"] = True
-            if args.only_unvoted:
-                ordered = [r for r in ordered if not r["votes"]]
+                if r["id"] in queued_removals:
+                    r["votes"] = sorted(set(r["votes"]) | {"remove"})
+                    r["queued"] = True
         else:
             print("(no frozen session found for this feed/pipeline -- run `start` first for a "
                   "stable review order where votes don't reshuffle later pages; falling back to "

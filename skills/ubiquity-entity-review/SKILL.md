@@ -406,6 +406,8 @@ python3 entity_review.py list --feed-id <feed_id> --pipeline-id <pipeline_id>
 #   -> prints a compact table: ID, VOTES (like/dislike/flag or '-'), CRED, TYPE, LANG, NAME
 #   Add --sort-by {credibility,name,id} (default credibility) and --reverse
 #   (highest-first) to control order; --only-unvoted hides anything already voted.
+#   Reads every entity in the feed, paging through the API 500 at a time,
+#   so feeds with more than 500 entities are listed in full.
 
 # 1b. Page through entities a few at a time, with full AI evaluation notes
 python3 entity_review.py page --feed-id <feed_id> --pipeline-id <pipeline_id> \
@@ -418,6 +420,10 @@ python3 entity_review.py page --feed-id <feed_id> --pipeline-id <pipeline_id> \
 #   URL and a count of any other source URLs on the entity.
 #   If a session exists (from `start`), walks ITS frozen order -- --sort-by/
 #   --reverse are ignored in that case (they only matter for `start`).
+#   Inside a session, --only-unvoted was already applied when `start`
+#   froze the order. Entities you queue votes or removals for stay on
+#   their page, marked "(queued, not yet applied)"; they are not hidden,
+#   so later pages never slide into pages you have already read.
 #   Fetches the real per-URL evaluation log (see section above) for just
 #   this page's rows by default -- pass --no-with-notes to skip that and
 #   fall back to the structured credibility/quality/local_focus/type
@@ -459,7 +465,11 @@ python3 entity_review.py apply --feed-id <feed_id> --pipeline-id <pipeline_id>
 #   that already landed). This matters because vote:toggle is NOT
 #   idempotent -- re-sending an already-applied vote flips it back off,
 #   so a stale/un-cleared queue silently undoes prior votes on the next
-#   `apply`. Run `start` again only when you want to begin a completely
+#   `apply`. `apply` also reads the pipeline's live votes first and
+#   skips (reporting "already-present") any queued vote that is already
+#   on the entity, so it never toggles off a vote that is already there.
+#   `queue` and `queue-remove` only edit the local session file and do
+#   not need a token. Run `start` again only when you want to begin a completely
 #   fresh pass (new frozen order); it is not required between `apply`
 #   calls within the same pass.
 
