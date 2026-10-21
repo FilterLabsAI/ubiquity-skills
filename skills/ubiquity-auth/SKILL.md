@@ -194,36 +194,44 @@ succeeds instantly. If scripting outside `browser_exec` (e.g. from
 `execute_code`'s persistent kernel), shell out to `curl` rather than using
 an in-process HTTP client:
 ```python
-from hermes_tools import terminal
-import json
+import json, os, subprocess, tempfile
+
+SCRIPT = os.path.expanduser("<path-to>/ubiquity-auth/scripts/filterlabs_auth.py")
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+WORK = tempfile.mkdtemp(prefix="ubi-")  # 0700, private to this user
 
 def api_call(method, path, body=None):
-    cmd_body = f"-d {json.dumps(json.dumps(body))}" if body is not None else ""
-    cmd = f'''
-TOKEN=$(cat /tmp/ubi_token.txt)
-curl -sS -m 60 -X {method} "https://ubiquity.filterlabs.ai{path}" \\
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
-  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \\
-  {cmd_body} -o /tmp/ubi_api_resp.json -w "HTTP_STATUS:%{{http_code}}\\n"
-'''
-    out = terminal(cmd)['output']
-    status = out.split("HTTP_STATUS:")[-1].strip()
-    with open('/tmp/ubi_api_resp.json') as f:
-        content = f.read()
-    try: return json.loads(content), status
-    except Exception: return content, status
+    token = subprocess.run(["python3", SCRIPT], capture_output=True, text=True,
+                           check=True).stdout.strip()
+    out = os.path.join(WORK, "resp.json")
+    cfg = [f'url = "https://ubiquity.filterlabs.ai{path}"', f'request = "{method}"',
+           f'header = "Authorization: Bearer {token}"', f'header = "User-Agent: {UA}"',
+           'header = "Content-Type: application/json"', "max-time = 60", "silent",
+           f'output = "{out}"', 'write-out = "%{http_code}"']
+    if body is not None:
+        bf = os.path.join(WORK, "body.json")
+        with open(os.open(bf, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(body, f)
+        cfg.append(f'data-binary = "@{bf}"')
+    # The config goes to curl on stdin (-K -): the token never appears in argv,
+    # `ps`, shell history, a /tmp file or the agent transcript.
+    r = subprocess.run(["curl", "-K", "-"], input="\n".join(cfg) + "\n",
+                       capture_output=True, text=True)
+    content = open(out).read() if os.path.exists(out) else ""
+    try: return json.loads(content), r.stdout.strip()
+    except Exception: return content, r.stdout.strip()
 ```
-Write the token to a scratch file once (`get_access_token()` from this
-skill's script) and have the shell command read it from there -- avoids
-re-embedding a long JWT into every shell command string, and survives
-`execute_code` kernel resets (which lose Python variables but not files
-on disk) better than keeping the token only in a Python variable. Avoid
-dumping large JSON responses directly to stdout through this path too --
-redirect to a file (`-o /tmp/....json`) and read it back with `read_file`/
-`json.load`, since very long single-line JSON piped through multiple
-tool-call layers has been observed getting mangled/truncated strangely
-(e.g. a `JSONDecodeError` or an silently truncated-looking printed string)
-when printed inline instead.
+Never write the token to a file of your own, never put it on a command
+line, and never print it. Files in `/tmp` are created with the default
+umask and are readable by every local user; in our testing an agent that
+followed the earlier version of this tip left a live access token in a
+world-readable `/tmp` file. Get a fresh token from the script for each call
+instead: it returns the cached token without a network call until the
+access token is about to expire. Keep response files in the private
+`mkdtemp()` folder above and read them back with `json.load`, since very
+long single-line JSON piped through multiple tool-call layers has been
+observed getting mangled or truncated when printed inline.
 
 ## `execute_code`'s persistent kernel is NOT durable across agent-side resets
 If a background job notification or other event causes the agent's own
