@@ -1,6 +1,6 @@
 ---
 name: ubiquity-onboarding
-description: Start here for anything on Filter, FilterLabs or Ubiquity (ubiquity.filterlabs.ai). Explains the end-to-end workflow, from a plain-language question about news or social posts (Reddit, X, forums) to a monitored feed, and which ubiquity-* skill handles each step.
+description: New-user overview of the full Ubiquity workflow + diagrams.
 ---
 
 # Ubiquity: new-user onboarding overview

@@ -1,6 +1,6 @@
 ---
 name: ubiquity-entity-review
-description: Use to review the sources a Filter / Ubiquity discovery job found for a pipeline (accounts, subreddits, sites), read why each was kept, and queue upvotes, downvotes or removals with the user's confirmation.
+description: Use to review Ubiquity discovered sources/entities, vote.
 ---
 
 # Ubiquity: entity/source review (upvote, downvote, remove)

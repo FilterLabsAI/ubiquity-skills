@@ -1,6 +1,6 @@
 ---
 name: ubiquity-understand-layer
-description: Use to turn on ingestion and analysis for a Filter / Ubiquity feed (Enable Ubi) and set or switch off its refresh interval, so posts and articles start arriving or stop being collected.
+description: Use to enable Ubiquity's Understand/Ubi layer, refresh rate.
 ---
 
 # Ubiquity: Understand layer -- enabling Ubi analysis + data refresh interval

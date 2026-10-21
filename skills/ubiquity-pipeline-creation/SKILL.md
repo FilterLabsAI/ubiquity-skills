@@ -1,6 +1,6 @@
 ---
 name: ubiquity-pipeline-creation
-description: Use to set up a Filter (FilterLabs Ubiquity) pipeline that monitors a topic in a place, for example news or Reddit and X posts about a subject. Covers parsing the query, the required location, saving the pipeline and launching discovery.
+description: Use to create Ubiquity pipelines via the Ubi discovery chat.
 ---
 
 # Ubiquity: creating a pipeline (discovery chat + agent settings + discovery job)

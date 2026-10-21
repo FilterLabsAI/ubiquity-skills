@@ -1,6 +1,6 @@
 ---
 name: ubiquity-skill-dev-workflow
-description: Use before committing or pushing changes to the ubiquity-* (Filter / FilterLabs Ubiquity) skills repo. Runs the leak scan, a soundness review and a scrub of user-specific details.
+description: Use before committing ubiquity-* skill changes to GitHub.
 ---
 
 # Reviewing & committing changes to ubiquity-* skills

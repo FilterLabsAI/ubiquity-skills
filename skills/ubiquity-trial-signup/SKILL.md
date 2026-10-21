@@ -1,6 +1,6 @@
 ---
 name: ubiquity-trial-signup
-description: Use only when a person asks to create their own new Filter / FilterLabs Ubiquity trial account. Explains the self-serve signup at agents.ubiquity.filterlabs.ai; each call creates a real account.
+description: Use to create new Ubiquity trial accounts for agents.
 ---
 
 # Ubiquity: creating a new trial account ("Ubiquity for Agents" preview)

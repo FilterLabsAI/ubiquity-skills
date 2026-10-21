@@ -1,6 +1,6 @@
 ---
 name: ubiquity-ubi-chat
-description: Use to ask Ubi, the Filter / Ubiquity per-feed assistant, questions about what a feed's collected posts and articles say, with citations.
+description: Use to chat with Ubiquity's Ubi bot about feed artifacts.
 ---
 
 # Ubiquity: Ubi chat (feed Q&A assistant)

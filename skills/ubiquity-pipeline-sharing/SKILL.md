@@ -1,6 +1,6 @@
 ---
 name: ubiquity-pipeline-sharing
-description: Use to share a Filter / Ubiquity pipeline with members of the same FilterLabs organization (view or edit access). Sharing is limited to existing org members; confirm recipient and access level with the user first.
+description: Use to share Ubiquity pipelines with org members.
 ---
 
 # Ubiquity: pipeline sharing / permissions

@@ -1,6 +1,6 @@
 ---
 name: ubiquity-data-feed-api
-description: Use to pull the actual posts and articles from a Filter / Ubiquity feed (Reddit, X, news and more) with full text, dates, URLs and filters, for analysis or export through the raw Data Feed API.
+description: Use to query Ubiquity feed content via raw Data Feed API.
 ---
 
 # Ubiquity: Data Feed (Curator Locations) API

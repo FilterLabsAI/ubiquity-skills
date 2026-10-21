@@ -1,6 +1,6 @@
 ---
 name: ubiquity-auth
-description: Use when a Filter / FilterLabs / Ubiquity API call needs a login token, or to check whether the stored Ubiquity login is still valid. Handles Keycloak login, token refresh and expiry checks for every other ubiquity-* skill.
+description: Use for Ubiquity/FilterLabs login & OAuth token management.
 ---
 
 # Ubiquity: login and token management
