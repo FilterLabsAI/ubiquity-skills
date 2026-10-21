@@ -13,6 +13,14 @@ link). Useful when a new agent/account needs its own Ubiquity login
 rather than reusing an existing one. See `ubiquity-auth` for logging in
 once the account exists.
 
+**Ask before every signup.** Each call creates a real, licensed
+production account (see below: there is no deliverability check). Only
+create an account when its future owner asks for one, for an address
+they control. Read the exact email back to the user and get a yes before
+the POST. Never sign up made-up, disposable or placeholder addresses, and
+never create accounts in bulk unless FilterLabs has agreed to it. If you
+cannot ask the user, do not sign anyone up.
+
 ## The flow -- CONFIRMED on the wire
 The signup page is a single form: **Email** (required), **First name**
 (optional), **Last name** (optional), and a "Create account" button.
@@ -55,8 +63,8 @@ does NOT create a duplicate account or re-send the invite email. The UI
 shows a different message in this case: *"`<email>` already has access.
 Check your email for the password link."* Use this response's
 `created`/`invited` fields to distinguish a brand-new signup from a
-repeat hit on an already-provisioned email, e.g. if scripting bulk
-account creation and re-running is possible.
+repeat hit on an already-provisioned email, e.g. if a confirmed signup
+might be re-run.
 
 ## The password-setup email -- CONFIRMED live
 Sent from `Ubiquity <no-reply@filterlabs.ai>` (reply-to
@@ -92,8 +100,9 @@ password + verify email in one step), then redirects to
 `https://ubiquity.filterlabs.ai/` already logged in.
 
 ## Practical use for Hermes
-- To provision a new Ubiquity account programmatically (e.g. for a new
-  user, a new agent identity, or a disposable test account), POST to
+- To provision a new Ubiquity account programmatically, for a user who
+  asked for one at their own address and confirmed it (see "Ask before
+  every signup" above; never for a made-up or disposable address), POST to
   `/api/v1/signup` directly -- no browser needed for this step, it's a
   plain unauthenticated REST call (no Bearer token required, this is
   the one Ubiquity-adjacent endpoint that predates having any account).

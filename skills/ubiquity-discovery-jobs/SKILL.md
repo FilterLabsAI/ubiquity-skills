@@ -50,7 +50,8 @@ you actually want discovery to run against the final filter set -- not
 once per add. If you (the agent) are about to call `jobs/create` (or
 click/script the equivalent UI button) and you're not 100% sure the user
 asked for THIS SPECIFIC new job right now, stop and ask first via
-`clarify`.
+`clarify` (or however your runtime asks the user; if you cannot ask, do
+not proceed).
 
 **Before launching, always check for an existing job first**: query
 `GET /api/locations/api/v1/jobs/count/status/running` and
@@ -234,9 +235,13 @@ an hour with `updated_at` never advancing -- entities kept appearing in the
 Discovered Sources list during this time (so SOME backend work was
 happening), but the job's own progress counter never moved and never
 completed. If a job's `updated_at` hasn't changed in a long time (tens of
-minutes) despite polling, don't assume it will eventually finish --
-cancel it (see above) and launch a fresh one rather than waiting
-indefinitely.
+minutes) despite polling, don't assume it will eventually finish, and
+don't silently wait forever either. Report the stall to the user with the
+evidence (job id, `status`, `progress`, and how long `updated_at` has been
+unchanged), offer to cancel it (see above), and ask before launching any
+replacement job. Never cancel and relaunch automatically: a replacement is
+a new discovery job, and repeated relaunches are how the 436 stuck jobs
+described above piled up.
 
 Always poll asynchronously (every 30-60s) rather than blocking, and tell
 the user up front to expect a long wait (and the possibility of a stall)
