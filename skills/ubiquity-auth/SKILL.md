@@ -35,9 +35,9 @@ command-line argument, because arguments are visible to other local users in
 
 Stores tokens at `$HERMES_HOME/secrets/filterlabs_tokens.json`. The file is
 written atomically (temp file, then rename) and is owner-only (0600) from the
-moment it is created; the `secrets` folder is created 0700.
-Never persists the raw password. All later calls (CLI or library) use this
-file automatically. **profile-scoped**, not a single shared file:
+moment it is created; the `secrets` folder is created 0700. Never persists
+the raw password. All later calls (CLI or library) use this file
+automatically. **profile-scoped**, not a single shared file:
 `HERMES_HOME` is set per-profile by the Hermes runtime (e.g.
 `~/.hermes/profiles/<profile>`), so each Hermes profile gets its own
 independent token file and a login in one profile can never read or
@@ -45,8 +45,7 @@ overwrite another profile's Ubiquity session. Only falls back to the
 unscoped `~/.hermes/secrets/filterlabs_tokens.json` when `HERMES_HOME`
 is unset entirely (e.g. a bare script run outside any Hermes session) --
 that fallback path is NOT profile-safe and should not be relied on
-during normal agent operation. Never persists the raw password. All
-later calls (CLI or library) use this file automatically.
+during normal agent operation.
 
 **Migration note**: earlier versions of this skill hardcoded the
 unscoped `~/.hermes/secrets/filterlabs_tokens.json` path for every
@@ -129,8 +128,6 @@ unknown argument exits with status 2 and usage instead of a token. Agents
 should prefer `--status` to check a login, and should never echo the token
 into their own output.
 
-```
-```
 These bare forms are safe for the AGENT to run via its own tool calls --
 the agent's own process already has `HERMES_HOME` set correctly by the
 Hermes runtime. They are NOT safe to hand the user verbatim for them to
