@@ -28,9 +28,28 @@ stdlib only, no deps):
 python3 scripts/filterlabs_auth.py --login "email@example.com" "password"
 ```
 
-Stores tokens at `~/.hermes/secrets/filterlabs_tokens.json` (chmod 600).
-Never persists the raw password. All later calls (CLI or library) use this
-file automatically.
+Stores tokens at `$HERMES_HOME/secrets/filterlabs_tokens.json` (chmod
+600) -- **profile-scoped**, not a single shared file: `HERMES_HOME` is
+set per-profile by the Hermes runtime (e.g.
+`~/.hermes/profiles/<profile>`), so each Hermes profile gets its own
+independent token file and a login in one profile can never read or
+overwrite another profile's Ubiquity session. Only falls back to the
+unscoped `~/.hermes/secrets/filterlabs_tokens.json` when `HERMES_HOME`
+is unset entirely (e.g. a bare script run outside any Hermes session) --
+that fallback path is NOT profile-safe and should not be relied on
+during normal agent operation. Never persists the raw password. All
+later calls (CLI or library) use this file automatically.
+
+**Migration note**: earlier versions of this skill hardcoded the
+unscoped `~/.hermes/secrets/filterlabs_tokens.json` path for every
+profile, which meant two profiles both running Ubiquity skills on the
+same machine would silently share (and clobber) one token file --
+whichever profile logged in most recently "won," and other profiles
+would silently operate against that profile's account. If you're
+upgrading from that version, every profile needs to run `--login` once
+more to populate its own profile-scoped token file -- there is no
+automatic migration of the old shared file, since it's not knowable
+which profile's credentials happen to be in it at upgrade time.
 
 IMPORTANT for agents: do NOT try to drive the login UI through a headless
 browser -- the browser tool's Chrome is typically headless with no visible
@@ -143,8 +162,9 @@ need to fill in the login form. The Angular SPA reads its session from
 `localStorage`. With a valid access token already obtained via this skill:
 
 ```python
-import json
-tok = json.load(open("/Users/<you>/.hermes/secrets/filterlabs_tokens.json"))
+import json, os
+hermes_home = os.environ.get("HERMES_HOME", "").strip() or os.path.expanduser("~/.hermes")
+tok = json.load(open(f"{hermes_home}/secrets/filterlabs_tokens.json"))
 access_token = tok["access_token"]
 # in the browser_exec context:
 goto_url("https://ubiquity.filterlabs.ai")

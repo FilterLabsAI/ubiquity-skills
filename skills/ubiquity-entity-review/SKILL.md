@@ -376,8 +376,8 @@ user confirm before `apply`.
 above into a CLI, verified live against a real 178-entity Germany feed.
 It needs only `feed_id` and `pipeline_id` (get both from
 `GET /api/locations/v1/pipelines/<pipeline_id>` or the `/pipelines` list
-page) and reads the access token from the same
-`~/.hermes/secrets/filterlabs_tokens.json` as `ubiquity-auth`'s script --
+page) and reads the access token from the same profile-scoped
+`$HERMES_HOME/secrets/filterlabs_tokens.json` as `ubiquity-auth`'s script --
 refresh it first if stale.
 
 **Pitfall discovered while building this**: calling the API with Python's
