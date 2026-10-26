@@ -102,9 +102,6 @@ sessions, artifacts). Every call needs:
 Authorization: Bearer <access_token>
 Content-Type: application/json   (for POST/PUT/PATCH)
 ```
-Scout search (separate skill, see `filterlabs-scout`/`scout-staging` if
-present in this profile) uses the SAME token against
-`scout.ubiquity.filterlabs.ai/api/v1/search`.
 
 401 errors usually mean the refresh_token itself expired (>8h idle) --
 re-run `--login` with fresh credentials.
