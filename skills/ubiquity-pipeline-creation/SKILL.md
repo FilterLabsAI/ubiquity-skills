@@ -776,9 +776,11 @@ GET /api/orchestrator/jobs/<job_id>/async-status
 ```
 Use the `/jobs/<job_id>` `progress` field for a simple percent; poll every
 30-60s, not more often -- this is a slow agentic job, not a quick lookup.
-Never block a foreground terminal call on it; launch a background poll (see
-the pattern in the `filterlabs-scout` skill's `scout_search.py
---background`) if driving this from a script.
+Never block a foreground terminal call on it if driving this from a
+script -- launch the poll loop as a background process (e.g.
+`terminal(..., background=true)` or an OS-level background job) that
+writes status/progress to a file on disk, and have the foreground caller
+check that file rather than blocking on the job itself.
 
 Job-list / counts (useful for a dashboard view across all pipelines):
 ```

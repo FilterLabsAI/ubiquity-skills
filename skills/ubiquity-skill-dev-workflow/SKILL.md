@@ -308,7 +308,6 @@ mechanism/bug/API being documented), never what it ISN'T or used to be.
   `skill_manage` update to this skill AND the user moving the repo clone
   to a new path. If the user moves the clone, just re-run `--set` with
   the new path; nothing else in this skill needs to change.
-- If the user has a separate scout-staging/prod skill or script mirror
-  (see persistent memory for `~/filterlabs/hermes-ubiquity-scout/`),
-  that is a DIFFERENT repo/workflow from this one -- don't conflate the
-  two unless the user says so.
+- If the user has any other skill/script mirror repo (ask if unsure which
+  one they mean), that is a DIFFERENT repo/workflow from this one -- don't
+  conflate the two unless the user says so.

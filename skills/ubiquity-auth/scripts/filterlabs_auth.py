@@ -49,7 +49,21 @@ except ImportError:  # Windows has no fcntl. There the lock is a no-op, which
     # means parallel refreshes are not serialised; run one process at a time.
     fcntl = None
 
-TOKEN_PATH = os.path.expanduser("~/.hermes/secrets/filterlabs_tokens.json")
+def _hermes_home():
+    """Resolve the active profile's Hermes home directory.
+
+    HERMES_HOME is set per-profile by the Hermes runtime (e.g.
+    ~/.hermes/profiles/<profile>), so scoping secrets under it keeps each
+    profile's Ubiquity session isolated. Falls back to ~/.hermes only when
+    HERMES_HOME is unset (e.g. a bare script run outside any Hermes
+    session) -- that fallback is NOT profile-safe and should only be hit
+    outside normal agent operation.
+    """
+    val = os.environ.get("HERMES_HOME", "").strip()
+    return val if val else os.path.expanduser("~/.hermes")
+
+
+TOKEN_PATH = os.path.join(_hermes_home(), "secrets", "filterlabs_tokens.json")
 LEEWAY_SECONDS = 120  # refresh if less than this much time remains
 
 REALM = "filter-labs-web"

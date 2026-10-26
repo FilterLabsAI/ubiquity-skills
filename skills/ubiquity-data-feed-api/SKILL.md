@@ -38,12 +38,12 @@ Understand-layer skills, NOT the pipeline/search UUID).
 | Param | Type | Notes |
 |---|---|---|
 | `limit` | int | default 100, min 1, max 1000. |
-| `offset` | int | default 0, min 0, max 10000 -- offset-based pagination, capped at 10000 (use `cursor` to page past that). |
-| `cursor` | string | ISO 8601 timestamp for cursor-based pagination. **UNCONFIRMED / possibly buggy**: re-querying with the `next_cursor` value from a prior response returned the SAME leading item again rather than advancing, in one live test with `limit=2`. Verify cursor advancement behavior further before relying on it for exhaustive pagination; `offset` may be more predictable up to its 10000 cap. |
+| `cursor` | string | Opaque cursor for cursor-based pagination: a base64-encoded JSON payload. Pass the `next_cursor` value from a prior response back as `cursor` verbatim to fetch the next page -- do not decode or construct it yourself. This is the only pagination mechanism the endpoint supports. |
 | `order_by` | string | `published_at` (default) or `scraped_at`. |
 | `content_max_length` | int | default 500, min 0, max 10000. **Confirmed**: truncates `content` and appends a literal `...` suffix (3 chars) -- requesting `content_max_length=20` returns a 23-character string ending in `...`. |
 | `include_vectors` | string | comma-separated: `search`, `cluster`. Adds a `vectors` object (vector name -> float32 array) to each item -- not tested live (payload-heavy, likely only useful for embedding-level analysis, not display). |
-| `date_from` / `date_to` | string | RFC3339 or `YYYY-MM-DD`. Confirmed working together with `text_search` in one live call. |
+| `date_from` | string | RFC3339 or `YYYY-MM-DD`. **Exclusive** -- an item with `published_at`/`scraped_at` exactly equal to `date_from` is NOT included. |
+| `date_to` | string | RFC3339 or `YYYY-MM-DD`. **Inclusive** -- an item exactly equal to `date_to` IS included. |
 | `text_search` | string | Full-text search across headline and content. Confirmed. |
 | `entity_ids` | string | comma-separated entity IDs. |
 | `entity_types` | string | comma-separated: `institution`, `individual`, or empty string. |
@@ -71,8 +71,8 @@ Understand-layer skills, NOT the pipeline/search UUID).
     "limit": 2,
     "total": 56314,
     "has_more": true,
-    "next_cursor": "2026-10-01T06:09:02.773000"
-    // "offset" also documented in the schema but not observed in a response that used cursor-based paging
+    "next_cursor": "eyJwdWJsaXNoZWRfYXQiOiIyMDI2LTEwLTAxVDA2OjA5OjAyWiIsInV1aWQiOiIuLi4ifQ=="
+    // next_cursor is an opaque base64-encoded JSON token -- pass it back as the `cursor` query param verbatim to fetch the next page
   }
 }
 ```

@@ -33,11 +33,31 @@ stdin with `--password-stdin`). It never accepts the password as a
 command-line argument, because arguments are visible to other local users in
 `ps` / `/proc/<pid>/cmdline` and land in shell history.
 
-Stores tokens at `~/.hermes/secrets/filterlabs_tokens.json`. The file is
+Stores tokens at `$HERMES_HOME/secrets/filterlabs_tokens.json`. The file is
 written atomically (temp file, then rename) and is owner-only (0600) from the
 moment it is created; the `secrets` folder is created 0700.
 Never persists the raw password. All later calls (CLI or library) use this
-file automatically.
+file automatically. **profile-scoped**, not a single shared file:
+`HERMES_HOME` is set per-profile by the Hermes runtime (e.g.
+`~/.hermes/profiles/<profile>`), so each Hermes profile gets its own
+independent token file and a login in one profile can never read or
+overwrite another profile's Ubiquity session. Only falls back to the
+unscoped `~/.hermes/secrets/filterlabs_tokens.json` when `HERMES_HOME`
+is unset entirely (e.g. a bare script run outside any Hermes session) --
+that fallback path is NOT profile-safe and should not be relied on
+during normal agent operation. Never persists the raw password. All
+later calls (CLI or library) use this file automatically.
+
+**Migration note**: earlier versions of this skill hardcoded the
+unscoped `~/.hermes/secrets/filterlabs_tokens.json` path for every
+profile, which meant two profiles both running Ubiquity skills on the
+same machine would silently share (and clobber) one token file --
+whichever profile logged in most recently "won," and other profiles
+would silently operate against that profile's account. If you're
+upgrading from that version, every profile needs to run `--login` once
+more to populate its own profile-scoped token file -- there is no
+automatic migration of the old shared file, since it's not knowable
+which profile's credentials happen to be in it at upgrade time.
 
 IMPORTANT for agents: do NOT try to drive the login UI through a headless
 browser -- the browser tool's Chrome is typically headless with no visible
@@ -52,12 +72,25 @@ never transit chat or be typed by the agent. Options, in order of
 preference:
   1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>`
      themselves**, in their OWN terminal, outside the agent's
-     tool-calling loop entirely -- the agent never sees the password. The
-     agent should name the exact command (substituting the user's real
-     email) and ask the user to run it; it just cannot execute it with
-     real credentials filled in itself. This is the simplest, most direct
-     path and should be offered first whenever a fresh/expired token is
-     needed and the user isn't already mid-flow on the actual login page.
+     tool-calling loop entirely -- the agent never sees the password.
+     **Prefix the command with `HERMES_HOME=<profile home>`** when giving
+     it to the user -- a plain terminal they open themselves has no
+     `HERMES_HOME` set (that's only set inside an active Hermes agent
+     session), so running the bare command without it silently falls back
+     to the unscoped `~/.hermes/secrets/filterlabs_tokens.json` path (see
+     the Migration note above) even though the fix is in place. Resolve
+     the current profile's home first (it's `$HERMES_HOME` from inside
+     the agent's own environment, e.g. `~/.hermes/profiles/ubiquity`) and
+     give the user the full, ready-to-paste command with it baked in, e.g.:
+     ```
+     HERMES_HOME=/Users/<you>/.hermes/profiles/<profile> python3 <path to filterlabs_auth.py> --login <email>
+     ```
+     The agent should name the exact command (substituting the user's real
+     email and the correct absolute script path) and ask the user to run
+     it; it just cannot execute it with real credentials filled in itself.
+     This is the simplest, most direct path and should be offered first
+     whenever a fresh/expired token is needed and the user isn't already
+     mid-flow on the actual login page.
   2. Use `browser_vault_save_login` (first open the real login page, e.g.
      via `goto_url`) -- this prompts the USER for the password in their
      own masked UI field, never through the agent/chat. If the vault
@@ -98,6 +131,15 @@ into their own output.
 
 ```
 ```
+These bare forms are safe for the AGENT to run via its own tool calls --
+the agent's own process already has `HERMES_HOME` set correctly by the
+Hermes runtime. They are NOT safe to hand the user verbatim for them to
+run in their own separate terminal (see option 1 above, "Browser SPA
+session bootstrap" below, and the `--login` section above) -- a plain
+terminal the user opens themselves has no `HERMES_HOME`, so the bare
+command falls back to the unscoped path. Always prefix with
+`HERMES_HOME=<profile home>` when the command is meant for the user to
+run themselves.
 
 Library usage (from Python, including inside other skills' scripts):
 ```python
@@ -118,9 +160,6 @@ sessions, artifacts). Every call needs:
 Authorization: Bearer <access_token>
 Content-Type: application/json   (for POST/PUT/PATCH)
 ```
-Scout search (separate skill, see `filterlabs-scout`/`scout-staging` if
-present in this profile) uses the SAME token against
-`scout.ubiquity.filterlabs.ai/api/v1/search`.
 
 401 errors usually mean the refresh_token itself expired (>8h idle) --
 re-run `--login` with fresh credentials.
@@ -162,8 +201,9 @@ need to fill in the login form. The Angular SPA reads its session from
 `localStorage`. With a valid access token already obtained via this skill:
 
 ```python
-import json
-tok = json.load(open("/Users/<you>/.hermes/secrets/filterlabs_tokens.json"))
+import json, os
+hermes_home = os.environ.get("HERMES_HOME", "").strip() or os.path.expanduser("~/.hermes")
+tok = json.load(open(f"{hermes_home}/secrets/filterlabs_tokens.json"))
 access_token = tok["access_token"]
 # in the browser_exec context:
 goto_url("https://ubiquity.filterlabs.ai")
