@@ -29,6 +29,7 @@ the closest equivalent) and its full list of source URLs.
 import argparse
 import base64
 import json
+import os
 import sys
 import textwrap
 from collections import Counter
@@ -37,10 +38,24 @@ from pathlib import Path
 from urllib import request, error, parse
 
 BASE_URL = "https://ubiquity.filterlabs.ai"
-TOKENS_PATH = Path.home() / ".hermes/secrets/filterlabs_tokens.json"
+
+
+def _hermes_home() -> Path:
+    """Resolve the active profile's Hermes home directory.
+
+    HERMES_HOME is set per-profile by the Hermes runtime, so scoping
+    secrets/cache under it keeps each profile's Ubiquity session isolated
+    (see ubiquity-auth's filterlabs_auth.py, which this must match).
+    Falls back to ~/.hermes only when HERMES_HOME is unset.
+    """
+    val = os.environ.get("HERMES_HOME", "").strip()
+    return Path(val) if val else Path.home() / ".hermes"
+
+
+TOKENS_PATH = _hermes_home() / "secrets" / "filterlabs_tokens.json"
 # Session cache (frozen entity order for a review pass) -- not a secret,
 # just scratch state, kept near the tokens dir purely for convenience.
-SESSION_DIR = Path.home() / ".hermes/cache/entity_review_sessions"
+SESSION_DIR = _hermes_home() / "cache" / "entity_review_sessions"
 
 
 def _load_token():
