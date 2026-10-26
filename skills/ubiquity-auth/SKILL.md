@@ -64,12 +64,25 @@ never transit chat or be typed by the agent. Options, in order of
 preference:
   1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>
      <password>` themselves**, in their OWN terminal, outside the agent's
-     tool-calling loop entirely -- the agent never sees the password. The
-     agent should name the exact command (substituting the user's real
-     email) and ask the user to run it; it just cannot execute it with
-     real credentials filled in itself. This is the simplest, most direct
-     path and should be offered first whenever a fresh/expired token is
-     needed and the user isn't already mid-flow on the actual login page.
+     tool-calling loop entirely -- the agent never sees the password.
+     **Prefix the command with `HERMES_HOME=<profile home>`** when giving
+     it to the user -- a plain terminal they open themselves has no
+     `HERMES_HOME` set (that's only set inside an active Hermes agent
+     session), so running the bare command without it silently falls back
+     to the unscoped `~/.hermes/secrets/filterlabs_tokens.json` path (see
+     the Migration note above) even though the fix is in place. Resolve
+     the current profile's home first (it's `$HERMES_HOME` from inside
+     the agent's own environment, e.g. `~/.hermes/profiles/ubiquity`) and
+     give the user the full, ready-to-paste command with it baked in, e.g.:
+     ```
+     HERMES_HOME=/Users/<you>/.hermes/profiles/<profile> python3 <path to filterlabs_auth.py> --login <email> <password>
+     ```
+     The agent should name the exact command (substituting the user's real
+     email and the correct absolute script path) and ask the user to run
+     it; it just cannot execute it with real credentials filled in itself.
+     This is the simplest, most direct path and should be offered first
+     whenever a fresh/expired token is needed and the user isn't already
+     mid-flow on the actual login page.
   2. Use `browser_vault_save_login` (first open the real login page, e.g.
      via `goto_url`) -- this prompts the USER for the password in their
      own masked UI field, never through the agent/chat. If the vault
@@ -101,6 +114,15 @@ python3 scripts/filterlabs_auth.py                # prints a valid access token
 python3 scripts/filterlabs_auth.py --status        # prints expiry countdowns
 python3 scripts/filterlabs_auth.py --login E P     # first-time / re-login
 ```
+These bare forms are safe for the AGENT to run via its own tool calls --
+the agent's own process already has `HERMES_HOME` set correctly by the
+Hermes runtime. They are NOT safe to hand the user verbatim for them to
+run in their own separate terminal (see option 1 above, "Browser SPA
+session bootstrap" below, and the `--login` section above) -- a plain
+terminal the user opens themselves has no `HERMES_HOME`, so the bare
+command falls back to the unscoped path. Always prefix with
+`HERMES_HOME=<profile home>` when the command is meant for the user to
+run themselves.
 
 Library usage (from Python, including inside other skills' scripts):
 ```python
