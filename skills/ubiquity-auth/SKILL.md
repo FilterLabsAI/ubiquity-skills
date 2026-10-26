@@ -25,20 +25,27 @@ Scripts live in `scripts/` of this skill and are self-contained (Python 3
 stdlib only, no deps):
 
 ```
-python3 scripts/filterlabs_auth.py --login "email@example.com" "password"
+python3 scripts/filterlabs_auth.py --login "email@example.com"
 ```
 
-Stores tokens at `$HERMES_HOME/secrets/filterlabs_tokens.json` (chmod
-600) -- **profile-scoped**, not a single shared file: `HERMES_HOME` is
-set per-profile by the Hermes runtime (e.g.
+The script prompts for the password without echo (or reads one line from
+stdin with `--password-stdin`). It never accepts the password as a
+command-line argument, because arguments are visible to other local users in
+`ps` / `/proc/<pid>/cmdline` and land in shell history.
+
+Stores tokens at `$HERMES_HOME/secrets/filterlabs_tokens.json`. The file is
+written atomically (temp file, then rename) and is owner-only (0600) from the
+moment it is created; the `secrets` folder is created 0700. Never persists
+the raw password. All later calls (CLI or library) use this file
+automatically. **profile-scoped**, not a single shared file:
+`HERMES_HOME` is set per-profile by the Hermes runtime (e.g.
 `~/.hermes/profiles/<profile>`), so each Hermes profile gets its own
 independent token file and a login in one profile can never read or
 overwrite another profile's Ubiquity session. Only falls back to the
 unscoped `~/.hermes/secrets/filterlabs_tokens.json` when `HERMES_HOME`
 is unset entirely (e.g. a bare script run outside any Hermes session) --
 that fallback path is NOT profile-safe and should not be relied on
-during normal agent operation. Never persists the raw password. All
-later calls (CLI or library) use this file automatically.
+during normal agent operation.
 
 **Migration note**: earlier versions of this skill hardcoded the
 unscoped `~/.hermes/secrets/filterlabs_tokens.json` path for every
@@ -62,8 +69,8 @@ running `--login` with them directly -- that was wrong and must not be
 followed; `clarify`-collected text is still chat, and a password must
 never transit chat or be typed by the agent. Options, in order of
 preference:
-  1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>
-     <password>` themselves**, in their OWN terminal, outside the agent's
+  1. **PREFERRED: have the user run `filterlabs_auth.py --login <email>`
+     themselves**, in their OWN terminal, outside the agent's
      tool-calling loop entirely -- the agent never sees the password.
      **Prefix the command with `HERMES_HOME=<profile home>`** when giving
      it to the user -- a plain terminal they open themselves has no
@@ -75,7 +82,7 @@ preference:
      the agent's own environment, e.g. `~/.hermes/profiles/ubiquity`) and
      give the user the full, ready-to-paste command with it baked in, e.g.:
      ```
-     HERMES_HOME=/Users/<you>/.hermes/profiles/<profile> python3 <path to filterlabs_auth.py> --login <email> <password>
+     HERMES_HOME=/Users/<you>/.hermes/profiles/<profile> python3 <path to filterlabs_auth.py> --login <email>
      ```
      The agent should name the exact command (substituting the user's real
      email and the correct absolute script path) and ask the user to run
@@ -111,9 +118,16 @@ preference:
 CLI:
 ```
 python3 scripts/filterlabs_auth.py                # prints a valid access token
-python3 scripts/filterlabs_auth.py --status        # prints expiry countdowns
-python3 scripts/filterlabs_auth.py --login E P     # first-time / re-login
+python3 scripts/filterlabs_auth.py --status        # prints expiry countdowns (no token)
+python3 scripts/filterlabs_auth.py --login EMAIL   # first-time / re-login; prompts for the password
+python3 scripts/filterlabs_auth.py --help          # usage (no token)
 ```
+
+Only the bare invocation prints a token. `--help` prints usage, and any
+unknown argument exits with status 2 and usage instead of a token. Agents
+should prefer `--status` to check a login, and should never echo the token
+into their own output.
+
 These bare forms are safe for the AGENT to run via its own tool calls --
 the agent's own process already has `HERMES_HOME` set correctly by the
 Hermes runtime. They are NOT safe to hand the user verbatim for them to
@@ -217,36 +231,44 @@ succeeds instantly. If scripting outside `browser_exec` (e.g. from
 `execute_code`'s persistent kernel), shell out to `curl` rather than using
 an in-process HTTP client:
 ```python
-from hermes_tools import terminal
-import json
+import json, os, subprocess, tempfile
+
+SCRIPT = os.path.expanduser("<path-to>/ubiquity-auth/scripts/filterlabs_auth.py")
+UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+      "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
+WORK = tempfile.mkdtemp(prefix="ubi-")  # 0700, private to this user
 
 def api_call(method, path, body=None):
-    cmd_body = f"-d {json.dumps(json.dumps(body))}" if body is not None else ""
-    cmd = f'''
-TOKEN=$(cat /tmp/ubi_token.txt)
-curl -sS -m 60 -X {method} "https://ubiquity.filterlabs.ai{path}" \\
-  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \\
-  -H "User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36" \\
-  {cmd_body} -o /tmp/ubi_api_resp.json -w "HTTP_STATUS:%{{http_code}}\\n"
-'''
-    out = terminal(cmd)['output']
-    status = out.split("HTTP_STATUS:")[-1].strip()
-    with open('/tmp/ubi_api_resp.json') as f:
-        content = f.read()
-    try: return json.loads(content), status
-    except Exception: return content, status
+    token = subprocess.run(["python3", SCRIPT], capture_output=True, text=True,
+                           check=True).stdout.strip()
+    out = os.path.join(WORK, "resp.json")
+    cfg = [f'url = "https://ubiquity.filterlabs.ai{path}"', f'request = "{method}"',
+           f'header = "Authorization: Bearer {token}"', f'header = "User-Agent: {UA}"',
+           'header = "Content-Type: application/json"', "max-time = 60", "silent",
+           f'output = "{out}"', 'write-out = "%{http_code}"']
+    if body is not None:
+        bf = os.path.join(WORK, "body.json")
+        with open(os.open(bf, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600), "w") as f:
+            json.dump(body, f)
+        cfg.append(f'data-binary = "@{bf}"')
+    # The config goes to curl on stdin (-K -): the token never appears in argv,
+    # `ps`, shell history, a /tmp file or the agent transcript.
+    r = subprocess.run(["curl", "-K", "-"], input="\n".join(cfg) + "\n",
+                       capture_output=True, text=True)
+    content = open(out).read() if os.path.exists(out) else ""
+    try: return json.loads(content), r.stdout.strip()
+    except Exception: return content, r.stdout.strip()
 ```
-Write the token to a scratch file once (`get_access_token()` from this
-skill's script) and have the shell command read it from there -- avoids
-re-embedding a long JWT into every shell command string, and survives
-`execute_code` kernel resets (which lose Python variables but not files
-on disk) better than keeping the token only in a Python variable. Avoid
-dumping large JSON responses directly to stdout through this path too --
-redirect to a file (`-o /tmp/....json`) and read it back with `read_file`/
-`json.load`, since very long single-line JSON piped through multiple
-tool-call layers has been observed getting mangled/truncated strangely
-(e.g. a `JSONDecodeError` or an silently truncated-looking printed string)
-when printed inline instead.
+Never write the token to a file of your own, never put it on a command
+line, and never print it. Files in `/tmp` are created with the default
+umask and are readable by every local user; in our testing an agent that
+followed the earlier version of this tip left a live access token in a
+world-readable `/tmp` file. Get a fresh token from the script for each call
+instead: it returns the cached token without a network call until the
+access token is about to expire. Keep response files in the private
+`mkdtemp()` folder above and read them back with `json.load`, since very
+long single-line JSON piped through multiple tool-call layers has been
+observed getting mangled or truncated when printed inline.
 
 ## `execute_code`'s persistent kernel is NOT durable across agent-side resets
 If a background job notification or other event causes the agent's own
@@ -262,7 +284,9 @@ assuming continuity, and persist anything that must survive (like the
 access token) to a file on disk, not just a kernel variable.
 - Never type a password into the browser login form yourself and never ask
   for one in chat.
-- CONCURRENCY: safe to reuse one token file across many parallel scripts;
-  `get_access_token()` refreshes idempotently (though a refresh rotates the
-  refresh_token, so avoid two processes refreshing at the exact same
-  instant -- in practice the 120s leeway window makes races rare).
+- CONCURRENCY: safe to reuse one token file across many parallel scripts.
+  A refresh rotates the refresh_token, so `get_access_token()` serialises
+  refreshes with an exclusive lock on `<token file>.lock` and re-reads the
+  file once it holds the lock; a second process that was waiting simply
+  picks up the token the first one just saved. (The lock uses `fcntl`, so
+  it is POSIX-only; on Windows run one refreshing process at a time.)
