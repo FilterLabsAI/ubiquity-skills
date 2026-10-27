@@ -122,7 +122,12 @@ endpoint exercised across the `ubiquity-*` skill family) and
      itself needs to directly reason over/summarize/analyze feed content
      (not just render a UI view), pull the raw corpus via the
      `/feeds/{id}/stream` endpoint -- full, untruncated content, no
-     1000-item display cap, filterable by date/text/entity. Some items
+     1000-item display cap, filterable by date/text/entity. **Default
+     `order_by=published_at` can silently skip artifacts whose
+     `published_at` is null** (no usable date, or unparseable); use
+     `order_by=scraped_at` (never null) when complete retrieval of every
+     artifact in the feed is required -- see `ubiquity-data-feed-api`
+     for the confirmed numbers. Some items
      also carry a `media_assets` array (present only when the item's
      source platform supports media capture) listing images/videos
      attached to that item; a separate `GET /feeds/{id}/media/

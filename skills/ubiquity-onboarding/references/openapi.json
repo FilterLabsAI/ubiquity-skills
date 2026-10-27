@@ -434,7 +434,7 @@
           {"name": "feed_id", "in": "path", "required": true, "schema": {"type": "integer"}, "description": "feed_id"},
           {"name": "limit", "in": "query", "schema": {"type": "integer", "default": 100, "minimum": 1, "maximum": 1000}},
           {"name": "cursor", "in": "query", "schema": {"type": "string"}, "description": "Opaque cursor for cursor-based pagination: base64-encoded JSON payload, returned as 'next_cursor' in the response's pagination object. Pass back verbatim to fetch the next page -- do not decode/construct it yourself."},
-          {"name": "order_by", "in": "query", "schema": {"type": "string", "enum": ["published_at", "scraped_at"], "default": "published_at"}},
+          {"name": "order_by", "in": "query", "schema": {"type": "string", "enum": ["published_at", "scraped_at"], "default": "published_at"}, "description": "published_at can be null (no usable date on the artifact, or unparseable); items with a null published_at are silently skipped by default ordering. scraped_at is set by the scraper at ingest time and is never null. Use order_by=scraped_at to retrieve every artifact in the feed; the default published_at ordering does not guarantee completeness."},
           {"name": "content_max_length", "in": "query", "schema": {"type": "integer", "default": 500, "minimum": 0, "maximum": 10000}},
           {"name": "include_vectors", "in": "query", "schema": {"type": "string", "description": "comma-separated: search, cluster"}},
           {"name": "date_from", "in": "query", "schema": {"type": "string"}, "description": "Start date filter -- exclusive (RFC3339 or YYYY-MM-DD)"},
