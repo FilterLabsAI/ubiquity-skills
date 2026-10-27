@@ -1,0 +1,47 @@
+{
+  "meta": {"company": "FilterLabs", "product": "Ubiquity API", "site": "filterlabs.ai"},
+  "overview": {
+    "intro": "The Ubiquity API lets you build discovery pipelines that find and curate sources and entities for a topic and location, then track and refine the resulting feed over time.",
+    "stats_extra": [["3", "service families"]],
+    "servers": {
+      "https://ubiquity.filterlabs.ai/api": "Main reverse-proxied backend for pipelines, feeds, jobs and search.",
+      "https://auth.filterlabs.ai": "Keycloak authentication server used to obtain and refresh access tokens.",
+      "https://agents.ubiquity.filterlabs.ai": "Self-serve trial signup service."
+    },
+    "authentication": "Clients authenticate against the Keycloak server to obtain a Bearer access token, which is sent as an `Authorization: Bearer <token>` header on every request. Access tokens are short-lived and must be refreshed periodically using the refresh token issued at login.",
+    "families": [
+      ["/locations", "Locations service", "Pipelines, feeds, saved searches, jobs, entities, permissions and organizations."],
+      ["/orchestrator", "Orchestrator service", "Parses search queries and launches discovery jobs."],
+      ["/understand", "Understand service", "Conversational chat sessions and generated artifacts."]
+    ],
+    "conventions": [
+      {"overview": true, "text": "All list endpoints support `limit` and `offset` query parameters for pagination."},
+      {"overview": false, "text": "Resource identifiers are UUIDs unless otherwise noted."}
+    ],
+    "status_codes": [
+      ["200", "Request succeeded."],
+      ["201", "Resource created."],
+      ["400", "Invalid request or resource not found by a business-logic check."],
+      ["401", "Missing or expired access token."],
+      ["404", "Resource not found."],
+      ["500", "Unexpected server error."]
+    ]
+  },
+  "workflow": {
+    "title": "Core workflow",
+    "lead": "A typical integration parses a query into a saved search, creates a pipeline and feed from it, launches a discovery job, and then polls the job until sources are ready for review.",
+    "steps": [
+      ["1", "POST", "/orchestrator/search/unified", "Parse a free-text query into entities and a location.", "Parsed query", "Search setup"],
+      ["2", "POST", "/locations/api/v1/saved-searches", "Persist the parsed query and filters.", "Saved search id", "Pipeline creation"],
+      ["3", "POST", "/locations/v1/pipelines", "Create a pipeline from a saved search.", "Pipeline object", "Pipeline creation"],
+      ["4", "POST", "/orchestrator/api/v1/jobs/create", "Launch a discovery job for the pipeline.", "Job id", "Discovery"],
+      ["5", "GET", "/locations/api/v1/jobs/{job_id}", "Poll job status until completion.", "Job status/progress", "Discovery"]
+    ]
+  },
+  "reference_note": "Endpoints are grouped by service below.",
+  "param_notes": {
+    "limit": "Page size for list results.",
+    "offset": "Number of results to skip, for pagination."
+  },
+  "endpoints": {}
+}
