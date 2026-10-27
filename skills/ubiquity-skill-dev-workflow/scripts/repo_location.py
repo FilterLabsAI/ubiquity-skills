@@ -41,11 +41,17 @@ them if they don't have one yet -- then persist it with `--set`.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 
 CONFIG_PATH = os.path.expanduser("~/.hermes/state/ubiquity-skills-repo.json")
 EXPECTED_REMOTE_SUBSTR = "FilterLabsAI/ubiquity-skills"
+# Exact owner/repo on github.com, any of the usual URL spellings. GitHub
+# owner and repo names are case-insensitive, so compare lowercased.
+_REMOTE_RE = re.compile(
+    r"^(?:https://(?:[^@/]+@)?github\.com/|git@github\.com:|ssh://git@github\.com/)"
+    r"(?P<slug>[^/]+/[^/]+?)(?:\.git)?/?$")
 
 
 def _load_config():
@@ -90,12 +96,15 @@ def validate(path):
     checks["path_exists"] = os.path.isdir(path)
     if not checks["path_exists"]:
         return False, checks, f"directory does not exist: {path}"
-    checks["is_git_repo"] = os.path.isdir(os.path.join(path, ".git"))
+    # `.git` is a directory in a normal clone but a FILE in a worktree or
+    # submodule; both are valid clones.
+    checks["is_git_repo"] = os.path.exists(os.path.join(path, ".git"))
     if not checks["is_git_repo"]:
         return False, checks, f"not a git repo (no .git dir): {path}"
     remote = _git_remote_url(path)
     checks["remote_url"] = remote
-    checks["remote_matches"] = bool(remote) and EXPECTED_REMOTE_SUBSTR in remote
+    m = _REMOTE_RE.match(remote or "")
+    checks["remote_matches"] = bool(m) and m.group("slug").lower() == EXPECTED_REMOTE_SUBSTR.lower()
     if not checks["remote_matches"]:
         return False, checks, (
             f"origin remote ({remote!r}) does not point at "
@@ -151,7 +160,7 @@ def main():
 
     if args.get:
         sys.exit(cmd_get())
-    elif args.set:
+    elif args.set is not None:
         sys.exit(cmd_set(args.set))
     elif args.status:
         sys.exit(cmd_status())
