@@ -515,7 +515,7 @@ three options:
   "Behavioral Dataset" upload. Has a "Skip AI validation" checkbox to add
   URLs without quality checks. Useful when you already know your sources
   and don't want to wait on an agent. **All three sub-flows CONFIRMED on
-  the wire** (captured against a disposable test pipeline, feed_id 1670):
+  the wire** (captured against a disposable test pipeline, feed_id 9005):
 
   **Plain Text / CSV Upload** (same endpoint, different payload shape):
   ```
@@ -539,7 +539,7 @@ three options:
   from the CSV's Name column, though this wasn't independently exercised
   with a populated Name column.) Both return `202` immediately:
   ```json
-  {"job_id": "<uuid>", "feed_id": 1670, "url_count": 2, "valid_urls": 2,
+  {"job_id": "<uuid>", "feed_id": 9005, "url_count": 2, "valid_urls": 2,
    "invalid_urls": 0, "status": "processing", "message": "Source URLs submitted for processing"}
   ```
   This is fire-and-forget (async) -- no confirmed polling endpoint for
@@ -746,7 +746,7 @@ pipeline object (`GET /api/locations/v1/pipelines/<id>`) looks like:
 {
   "id": "<pipeline_uuid>", "keycloak_user_id": "<email>",
   "name": "<the free-text query, used as the default name>",
-  "saved_search_id": "<uuid>", "feed_id": 1662, "session_id": "<uuid>",
+  "saved_search_id": "<uuid>", "feed_id": 9001, "session_id": "<uuid>",
   "auto_sync_enabled": true, "sync_on_job_completion": true, "sync_on_map_change": false,
   "metadata": {
     "discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25},
