@@ -223,10 +223,12 @@ the UN, Brussels for NATO HQ) or the specific member countries the user
 actually cares about -- don't just reword the original organization name,
 that was confirmed not to help. If a discovery job is already running
 against the old (wrong) location when you fix it, remember the running
-job keeps going unaffected -- cancel it and launch a fresh one (see
-`ubiquity-discovery-jobs`) if you want the corrected location to actually
-produce new discovered sources, rather than assuming the fix alone
-retroactively corrects what's already in flight.
+job keeps going unaffected. Tell the user, and offer to cancel it and
+launch a fresh one (see `ubiquity-discovery-jobs`) if they want the
+corrected location to actually produce new discovered sources, rather
+than assuming the fix alone retroactively corrects what's already in
+flight. Ask before cancelling or launching; a fresh job is a new
+discovery run, so never do it automatically.
 
 ## Multiple locations on one pipeline
 A pipeline can target MORE than one location at once -- useful for a group
@@ -373,7 +375,8 @@ coverage** (there is no single-call fix):
    aggregating feed -- most setup, best per-region query coverage, avoids
    the persistence ceiling on any single pipeline.
 Always surface this limitation and ask the user to pick an option via
-`clarify` rather than silently substituting a country/region without
+`clarify` (or however your runtime asks the user; if you cannot ask, do
+not proceed) rather than silently substituting a country/region without
 telling them -- "global" framed by the user and "United States" (or any
 other substitution) delivered without comment are materially different
 scopes.
@@ -656,7 +659,16 @@ Content-Type: application/json
 ```
 `200`, returns the updated pipeline with `metadata.discovery_config` set.
 
-**3e. Launch the discovery job:**
+**3e. Launch the discovery job (only after the user says yes):**
+
+Stop before this call and ask the user, stating the pipeline, the location
+it resolved to (and that a proxy location is a stand-in, if one is used),
+and the cost: one slow agentic job, 15 minutes to over an hour, one at a
+time per pipeline. Check running and pending jobs first
+(`ubiquity-discovery-jobs`). A request such as "find me posts about X" is
+not consent to launch a job. If you cannot ask the user, stop after 3d
+(the pipeline is saved and nothing is lost) and report what is ready.
+
 ```
 POST /api/orchestrator/api/v1/jobs/create
 Content-Type: application/json
