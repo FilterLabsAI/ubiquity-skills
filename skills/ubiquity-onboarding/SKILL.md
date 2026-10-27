@@ -15,7 +15,7 @@ Linked files: `references/openapi.json` (OpenAPI 3.0 spec for every
 endpoint exercised across the `ubiquity-*` skill family) and
 `references/flowcharts.md` (Mermaid diagrams of the end-to-end workflow).
 
-## The 8-step workflow
+## The workflow (steps 0-9)
 
 0. **Get an account, if you don't have one.** New accounts are
    self-serve via the "Ubiquity for Agents" preview signup at
