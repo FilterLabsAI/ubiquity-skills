@@ -206,12 +206,11 @@ Other things ruled out:
 - No direct "edit/override location" input field, map-pin drag, or
   location-picker UI was found on the Discover tab itself.
 - A location name-search endpoint does exist --
-  `GET /api/locations/v1/locations?q=<text>&limit=<n>` -- but querying it
-  directly for "European Union" returned a page of UNRELATED Mexican/
-  other city results, not the EU or anything close -- it's a free-text/
-  fuzzy search over the same underlying POI dataset the buggy geocoder
-  uses, not a curated country/region list, and isn't a reliable way to
-  find a correct supranational-entity UUID to substitute manually.
+  `GET /api/locations/v1/locations?q=<text>&limit=<n>`. `q=` filtering and
+  `offset=` pagination are confirmed working (see the CONFIRMED note
+  further below for detail). It only searches locations already in
+  Ubiquity's database -- new locations are added via the unified-search/
+  discovery workflow, not this endpoint.
 
 **Practical guidance**: for supranational or multi-country entities (EU,
 UN, NATO, ASEAN, African Union, Eurozone, etc.), always check
@@ -350,13 +349,14 @@ Indiana, USA; "Africa" -> silently resolves to just "South Africa" (the
 country, not the continent); "Oceania" -> a neighborhood called
 "Oceania" in Itagibá, Brazil. Only "North America" came back even
 plausibly continent-shaped by accident; the other five are the same
-street/POI-collision bug as the EU/UN/NATO cases. `GET
-/api/locations/v1/locations?q=<term>` also doesn't help here -- querying
-"Global"/"Earth"/"International"/"World" all return the exact SAME top-5
-unrelated results (Mexican cities, a Canadian province, the ASEAN HQ,
-Abuja Nigeria) regardless of query text, meaning the search isn't even
-text-matching sensibly for these terms -- there is no real "World"/
-"Global" entry in Ubiquity's location database to fall back to.
+street/POI-collision bug as the EU/UN/NATO cases. Querying `GET
+/api/locations/v1/locations?q=<term>` for these continent/"Global"/
+"Earth"/"World" terms historically returned unrelated results too, since
+no such entry exists in the database -- note `q=`/`offset=` themselves
+are confirmed working for real place names (see the CONFIRMED note
+further below); these specific terms just have no matching database
+entry, which this endpoint can't fix since it only searches existing
+locations.
 
 **Practical options for a user who wants genuinely global/worldwide
 coverage** (there is no single-call fix):
@@ -795,6 +795,18 @@ response envelope**, unlike every other endpoint in this skill family
 `None`/empty results against these two endpoints specifically -- unwrap
 twice (`resp["data"]["data"]`), not once.
 
+**CONFIRMED: `q=` filtering and `offset=` pagination work correctly** on
+`GET /api/locations/v1/locations`. `q=Berlin` -> only `"Berlin, Germany"`;
+`q=Paris` -> only Paris-matching names; no `q` -> an unrelated baseline
+set -- proving `q` genuinely filters. `offset=5` returns the next page
+with no overlap vs `offset=0`. (Older notes elsewhere describing `q=` as
+not text-matching for "European Union"/"Global"/"Earth" reflect those
+specific terms having no matching DB entry, not a search bug.)
+
+**Note: read-only lookup over EXISTING locations only** -- it can't
+create or surface a new place. New locations enter the database via the
+normal unified-search/discovery workflow, not this endpoint.
+
 ## Step 4: track the discovery job
 The discovery job is slow -- in testing a job took **15-20+ minutes** to
 go from 0% to completion against a continent-scale location + broad
@@ -949,3 +961,12 @@ likely just re-PATCHes with the default values shown above).
   (vs. "Yes, Discover Sources") confirms this live -- see Step 3. Don't
   assume you must launch a discovery job just because the user asked for
   a pipeline to be created.
+- **When asked to re-confirm a previously-documented bug is fixed, only
+  claim what you actually re-tested.** Re-test with concrete inputs (e.g.
+  real place names), then state explicitly which of the ORIGINAL failing
+  inputs (e.g. "European Union"/"Global"/continent names) were NOT part
+  of the re-test, rather than letting a narrow successful retest read as
+  a blanket "this endpoint is fixed." A fix confirmed for one input
+  class does not imply it holds for every input class that was
+  originally broken; server-side filtering/search bugs are frequently
+  per-query-shape, not global.

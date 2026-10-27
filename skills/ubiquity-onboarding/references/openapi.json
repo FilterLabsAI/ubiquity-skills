@@ -463,10 +463,11 @@
       }
     },
     "/locations/v1/locations": {
-      "get": {"summary": "Free-text location/POI search (not a curated country/region list)", "parameters": [
+      "get": {"summary": "Free-text location/POI search over EXISTING locations in Ubiquity's own database only (not a geocoder, not a curated country/region list; won't surface a place that hasn't been added via the unified-search/discovery workflow). CONFIRMED working: q= genuinely filters by name, and offset= paginates with no overlap between pages.", "parameters": [
         {"name": "q", "in": "query", "required": true, "schema": {"type": "string"}},
-        {"name": "limit", "in": "query", "schema": {"type": "integer"}}
-      ], "responses": {"200": {"description": "array of location matches"}}}
+        {"name": "limit", "in": "query", "schema": {"type": "integer"}},
+        {"name": "offset", "in": "query", "schema": {"type": "integer"}}
+      ], "responses": {"200": {"description": "double-nested envelope: {data: {data: [...]}}, array of location matches"}}}
     },
     "/locations/v1/locations/{location_uuid}": {
       "get": {"summary": "Get a (possibly synthesized COMBINED-) location object", "parameters": [{"name": "location_uuid", "in": "path", "required": true, "schema": {"type": "string"}}], "responses": {"200": {"description": "{id, name, abbreviation, country, coordinates, bounding_box}"}}}
