@@ -50,6 +50,18 @@ PATTERNS = [
      re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")),
     ("uuid", "medium",
      re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b")),
+    ("numeric_resource_id", "low",
+     # feed_id/entity_id/source_id/job_id as a real integer, in code
+     # (feed_id=1663, feed_id: 1663, --feed-id 1663) or JSON
+     # (`"feed_id": 1663`, `"source_ids": [247013, ...]`), or named in
+     # prose ("feed 1663", "entity 53920"). These aren't secrets, but a
+     # real feed/entity/source id in a committed doc still discloses which
+     # production feeds/pipelines/entities were used for testing -- flag
+     # low severity so a human decides per the project's ID convention
+     # (see ubiquity-skill-dev-workflow/SKILL.md) rather than silently
+     # leaving real business-context IDs in shared docs indefinitely.
+     re.compile(r"(?i)\b(?:feed|entity|source)s?(?:[_-]?ids?)?\b[\"']?\s*[:=]?\s*"
+                r"\[?\s*\b\d{3,6}\b")),
     ("ipv4", "low",
      re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|1?\d{1,2})\b")),
     ("internal_hostname", "low",
@@ -103,6 +115,7 @@ def suggest_fix(kind):
     return {
         "email": "replace with a placeholder like user@example.com, or <REDACTED_EMAIL>",
         "uuid": "replace with a generic placeholder like <PIPELINE_UUID>/<FEED_ID>/<ENTITY_ID>, or remove the example",
+        "numeric_resource_id": "replace with a fake-but-plausible example id (consistent across one doc/example), or a placeholder like <FEED_ID>/<ENTITY_ID>",
         "jwt_or_bearer_token": "MUST remove/redact -- never commit a token even if expired",
         "aws_access_key_id": "MUST remove/redact immediately and rotate the key",
         "pem_private_key": "MUST remove entirely -- never commit private key material",

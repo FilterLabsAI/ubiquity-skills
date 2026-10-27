@@ -173,11 +173,11 @@ per-feed counts instead of one identical account-wide number, and for a
 feed under the 1000-item `artifacts/preview` cap (640 artifacts) the two
 endpoints' counts matched exactly:
 ```
-feed 1662: artifacts/count -> 640   | artifacts/preview total_count -> 640  (exact match, under cap)
-feed 1663: artifacts/count -> 95889 | artifacts/preview total_count -> 1000 (capped, consistent: real count > cap)
-feed 1665: artifacts/count -> 14191 | artifacts/preview total_count -> 1000 (capped, consistent)
-feed 1668: artifacts/count -> 22959 | artifacts/preview total_count -> 1000 (capped, consistent)
-feed 1670: artifacts/count ->  3075 | artifacts/preview total_count -> 1000 (capped, consistent)
+feed 9001: artifacts/count -> 640   | artifacts/preview total_count -> 640  (exact match, under cap)
+feed 9002: artifacts/count -> 95889 | artifacts/preview total_count -> 1000 (capped, consistent: real count > cap)
+feed 9003: artifacts/count -> 14191 | artifacts/preview total_count -> 1000 (capped, consistent)
+feed 9004: artifacts/count -> 22959 | artifacts/preview total_count -> 1000 (capped, consistent)
+feed 9005: artifacts/count ->  3075 | artifacts/preview total_count -> 1000 (capped, consistent)
 ```
 **`artifacts/count` is now the preferred, fast way to check whether a
 feed has ingested anything yet / to poll ingestion progress** -- it's a

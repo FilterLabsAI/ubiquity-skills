@@ -66,8 +66,8 @@ observed -- a test call with `{"filter_mode": "liked_only",
 "filter_config": {"min_credibility": 0.5}}` returned `201` with those
 exact values persisted (`GET` afterward echoed the same).
 **Effect NOT yet confirmed**: a live test created a `liked_only` route
-from a pipeline with 15 liked entities (NYC rat-mitigation, feed 1668) to
-a route-wise-empty destination pipeline (feed 1670, 47 pre-existing
+from a pipeline with 15 liked entities (NYC rat-mitigation, feed 9004) to
+a route-wise-empty destination pipeline (feed 9005, 47 pre-existing
 entities from its own discovery), clicked the pipeline detail page's
 "Trigger Sync" button (fired no observable network call under an XHR/
 fetch interceptor -- either it's not wired to a request this skill's

@@ -89,6 +89,26 @@ class TestLeakScanner(h.TempDirCase):
         self.assertIn("generic_secret_assignment",
                       self.kinds('{"refresh_token": ' + '"8f1c2e9a7b6d5c4e3f2a1b0c"}'))
 
+    def test_flags_numeric_feed_entity_source_ids(self):
+        """A real feed_id/entity_id/source_id in a committed doc discloses
+        which production feed/entity was used for testing, even though it
+        isn't a secret. Must fire on every shape seen in real skill docs:
+        bare prose ("feed 1663", "entity 53920"), code (feed_id=1663,
+        --feed-id 1663), and JSON (`"feed_id": 1663`, `"source_ids":
+        [247013, ...]`) -- but NOT on an unrelated number near the word
+        "feed" with no id-like context (count/limit text), and not on a
+        path placeholder like `{feed_id}`."""
+        self.assertIn("numeric_resource_id", self.kinds("feed 1663 artifacts"))
+        self.assertIn("numeric_resource_id", self.kinds("feed_id=1663"))
+        self.assertIn("numeric_resource_id", self.kinds("--feed-id 1663"))
+        self.assertIn("numeric_resource_id", self.kinds('{"feed_id": 1663}'))
+        self.assertIn("numeric_resource_id", self.kinds("entity 53920 \"Rats\""))
+        self.assertIn("numeric_resource_id",
+                      self.kinds('{"source_ids": [247013, 246948]}'))
+        self.assertNotIn("numeric_resource_id", self.kinds("the feed has 640 artifacts"))
+        self.assertNotIn("numeric_resource_id", self.kinds("GET /feeds/{feed_id}/stream"))
+        self.assertNotIn("numeric_resource_id", self.kinds("limit=500"))
+
 
 class TestRepoLocation(h.TempDirCase):
     def setUp(self):

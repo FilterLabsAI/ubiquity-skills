@@ -12,11 +12,11 @@ Auth: reads access_token from ~/.hermes/secrets/filterlabs_tokens.json
     python3 filterlabs_auth.py        # refreshes if needed
 
 Usage:
-    python3 entity_review.py list --feed-id 1663 --pipeline-id 2fed2023-...
-    python3 entity_review.py page --feed-id 1663 --pipeline-id 2fed2023-... --page 0 --page-size 5
-    python3 entity_review.py vote --pipeline-id 2fed2023-... --entity-id 26628 --vote-type dislike
-    python3 entity_review.py remove --feed-id 1663 --entity-id 26628
-    python3 entity_review.py suggest --feed-id 1663 --pipeline-id 2fed2023-...
+    python3 entity_review.py list --feed-id 9002 --pipeline-id 2fed2023-...
+    python3 entity_review.py page --feed-id 9002 --pipeline-id 2fed2023-... --page 0 --page-size 5
+    python3 entity_review.py vote --pipeline-id 2fed2023-... --entity-id 88006 --vote-type dislike
+    python3 entity_review.py remove --feed-id 9002 --entity-id 88006
+    python3 entity_review.py suggest --feed-id 9002 --pipeline-id 2fed2023-...
 
 `list` and `page` both support --sort-by {credibility,name,id}, --reverse
 (highest-first instead of lowest-first), and --only-unvoted (hide anything
