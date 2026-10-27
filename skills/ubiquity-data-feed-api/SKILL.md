@@ -47,7 +47,7 @@ Understand-layer skills, NOT the pipeline/search UUID).
 |---|---|---|
 | `limit` | int | default 100, min 1, max 1000. |
 | `cursor` | string | Opaque cursor for cursor-based pagination: a base64-encoded JSON payload. Pass the `next_cursor` value from a prior response back as `cursor` verbatim to fetch the next page -- do not decode or construct it yourself. This is the only pagination mechanism the endpoint supports. |
-| `order_by` | string | `published_at` (default) or `scraped_at`. |
+| `order_by` | string | `published_at` (default) or `scraped_at`. **`published_at` can be null** (the underlying artifact had no date, or the scraper couldn't parse one) -- items with a null `published_at` are silently skipped by the default ordering, so paging through with the default `order_by` does NOT retrieve the full corpus. **Confirmed live** (feed 9001, 2026-10-27): walking every page with `order_by=published_at` returned only 1155 of 1314 total items; the missing 159 all had `published_at: null`. `scraped_at` is never null (it's set by the scraper itself at ingest time, not derived from the source content) -- walking the same feed with `order_by=scraped_at` returned all 1314 items. **If complete retrieval of every artifact in the feed is required, use `order_by=scraped_at`**, not the default. |
 | `content_max_length` | int | default 500, min 0, max 10000. **Confirmed**: truncates `content` and appends a literal `...` suffix (3 chars) -- requesting `content_max_length=20` returns a 23-character string ending in `...`. |
 | `include_vectors` | string | comma-separated: `search`, `cluster`. Adds a `vectors` object (vector name -> float32 array) to each item -- not tested live (payload-heavy, likely only useful for embedding-level analysis, not display). |
 | `date_from` | string | RFC3339 or `YYYY-MM-DD`. **Exclusive** -- an item with `published_at`/`scraped_at` exactly equal to `date_from` is NOT included. |
@@ -218,6 +218,19 @@ count matching the `bytes` field exactly).
   affordance for it yet.
 
 ## Pitfalls
+- **Default `order_by=published_at` silently skips artifacts with no usable
+  published date -- use `order_by=scraped_at` for complete retrieval.**
+  `published_at` is derived from the source content and can be null when
+  the artifact had no date or the scraper couldn't parse one; items with
+  a null `published_at` are dropped from the default-ordered result set
+  entirely (confirmed live: 159 of 1314 items on a real feed, all with
+  `published_at: null`, were absent when paging with the default
+  `order_by`). `scraped_at` is set by the scraper itself at ingest time
+  and is never null, so paging with `order_by=scraped_at` is the only way
+  to guarantee every artifact in the feed is retrieved. Default to
+  `scraped_at` for any exhaustive export/analysis task; only use
+  `published_at` ordering when recency-by-publish-date matters more than
+  completeness and the gaps are acceptable.
 - **Bad/future `published_at` dates observed on Wikipedia-sourced items**:
   seen live values of `2065-10-02` and `2050-10-02` on items whose `url`
   was a German Wikipedia renewable-energy article -- these are almost
