@@ -109,9 +109,15 @@ class ERBase(h.TempDirCase):
 
 class TestPureFunctions(ERBase):
     def test_user_uuid_from_jwt_sub(self):
+        """_user_uuid() must extract the `sub` claim from a real base64url
+        JWT payload, not any other claim (e.g. email)."""
         self.assertEqual(self.mod._user_uuid(h.fake_jwt(sub="abc")), "abc")
 
     def test_split_notes_sections(self):
+        """The free-text evaluation-notes parser must split a labelled
+        narrative into the right dict keys (lede/strengths/limitations/
+        recommended_use/acknowledge), and must return {} for empty input
+        rather than crashing."""
         s = self.mod._split_notes_sections(
             "Good outlet. STRENGTHS: (1) x. LIMITATIONS: (1) y. RECOMMENDED USE: z. ACKNOWLEDGE: w")
         self.assertEqual(s["lede"], "Good outlet.")
@@ -122,6 +128,10 @@ class TestPureFunctions(ERBase):
         self.assertEqual(self.mod._split_notes_sections(""), {})
 
     def test_build_review_table_joins_votes(self):
+        """Entities must merge correctly with a votes list keyed by
+        entity_id: votes grouped+sorted per entity, entities with no votes
+        getting an empty list (not a missing key or crash), and source
+        URLs carried through from the entity's `sources` field."""
         fake = FakeUbiquity(3, votes=[{"entity_id": 2, "vote_type": "like"},
                                       {"entity_id": 2, "vote_type": "flag"}])
         rows = self.mod.build_review_table(fake.entities, fake.votes)
@@ -130,12 +140,19 @@ class TestPureFunctions(ERBase):
         self.assertEqual(rows[0]["urls"], ["https://src1.example.com"])
 
     def test_sort_rows_handles_missing_credibility(self):
+        """Sorting by credibility must treat a None score as lowest (not
+        raise a TypeError from comparing None to a float), and sorting by
+        name must work as an independent, correctly-ordered key."""
         rows = [{"id": 1, "name": "b", "credibility": None},
                 {"id": 2, "name": "a", "credibility": 0.5}]
         self.assertEqual([r["id"] for r in self.mod.sort_rows(rows)], [1, 2])
         self.assertEqual([r["id"] for r in self.mod.sort_rows(rows, "name")], [2, 1])
 
     def test_suggest_flags_disproportionate_dislikes(self):
+        """The suggest heuristic must actually fire text naming the specific
+        field/value and a follow-on credibility_threshold recommendation
+        when dislikes outweigh likes on a bad-quality value by >= 2x --
+        not just print generic boilerplate regardless of input."""
         rows = [{"votes": ["dislike"], "type": "x", "language": "en", "local_focus": "low",
                  "quality": "fair", "credibility": 0.2} for _ in range(3)]
         rows += [{"votes": ["like"], "type": "x", "language": "en", "local_focus": "high",
@@ -146,6 +163,9 @@ class TestPureFunctions(ERBase):
         self.assertIn("credibility_threshold", out.getvalue())
 
     def test_suggest_without_votes(self):
+        """With zero votes recorded, suggest_updates() must print a plain
+        "no votes yet" message rather than crashing on empty like/dislike
+        groups or printing misleading distribution stats."""
         with contextlib.redirect_stdout(io.StringIO()) as out:
             self.mod.suggest_updates([{"votes": []}])
         self.assertIn("No votes recorded yet", out.getvalue())
@@ -153,6 +173,10 @@ class TestPureFunctions(ERBase):
 
 class TestHttp(ERBase):
     def test_call_sets_headers(self):
+        """A real vote call must set Authorization: Bearer <token>, a
+        browser User-Agent, Content-Type: application/json, and must
+        correctly decode the JWT end-to-end to populate keycloak_user_id
+        in the request body (not just in the isolated _user_uuid test)."""
         fake = FakeUbiquity(1)
         srv = h.FakeServer(fake.routes())
         with mock.patch.object(self.mod.request, "urlopen", srv):
@@ -164,12 +188,20 @@ class TestHttp(ERBase):
         self.assertEqual(c["body"]["keycloak_user_id"], "11111111-2222-3333-4444-555555555555")
 
     def test_http_error_returns_status(self):
+        """A 404 from the server must surface as a (status, data) tuple
+        from remove_entity(), not raise an unhandled HTTPError."""
         srv = h.FakeServer([("DELETE", "/", lambda r, b: (404, {"error": "nope"}))])
         with mock.patch.object(self.mod.request, "urlopen", srv):
             status, data = self.mod.remove_entity(self.token, FEED, 9)
         self.assertEqual((status, data), (404, {"error": "nope"}))
 
     def test_apply_drops_successes_and_keeps_failures(self):
+        """Runs the FULL CLI (start -> queue -> queue-remove -> apply) with
+        the server made to fail the removal. The session file afterward
+        must drop the successful vote from the queue but keep the failed
+        removal queued for retry, and the printed summary must say
+        "Applied 1/2" -- a failed action wrongly dropped would be silent
+        data loss; a successful one wrongly left queued would double-apply."""
         fake = FakeUbiquity(4)
         self.run_cli(fake, "start", "--feed-id", FEED, "--pipeline-id", PIPE)
         self.run_cli(fake, "queue", "--feed-id", FEED, "--pipeline-id", PIPE,
@@ -185,6 +217,11 @@ class TestHttp(ERBase):
         self.assertIn("Applied 1/2", out)
 
     def test_page_with_notes(self):
+        """`page` must fetch and render real evaluation-log text for each
+        row (VERDICT: ...), and must call the evaluation-log endpoint
+        exactly once per entity ON THE PAGE (2, for a 2-item page out of
+        3 entities) -- not 0 (notes not fetched) and not 3 (fetched for
+        entities outside the page before slicing)."""
         fake = FakeUbiquity(3)
         out, srv = self.run_cli(fake, "page", "--feed-id", FEED, "--pipeline-id", PIPE,
                                 "--page", 0, "--page-size", 2)
@@ -197,7 +234,9 @@ class TestReviewSafety(ERBase):
         """SKILL.md: `start` + `queue` 'guarantees page numbers stay stable even
         with --only-unvoted active'. The script used to mark queued entities as voted
         and then filters them out, so page 1 slides into page 0's slot and the
-        reviewer never sees entities 6-10."""
+        reviewer never sees entities 6-10. Verified during PR review: this
+        test and its siblings in this class fail 7/7 against the pre-fix
+        entity_review.py, confirming they catch the real regression."""
         fake = FakeUbiquity(10)
         self.run_cli(fake, "start", "--feed-id", FEED, "--pipeline-id", PIPE,
                      "--sort-by", "id", "--only-unvoted")
@@ -215,6 +254,9 @@ class TestReviewSafety(ERBase):
         self.assertEqual(self.ids_on_page(out1), [6, 7, 8, 9, 10])
 
     def test_queued_removal_does_not_shift_pages(self):
+        """Same frozen-order guarantee as the test above, specifically for a
+        queued REMOVAL rather than a queued vote: a pending remove must not
+        shift which entities appear on later pages."""
         fake = FakeUbiquity(10)
         self.run_cli(fake, "start", "--feed-id", FEED, "--pipeline-id", PIPE, "--sort-by", "id")
         self.run_cli(fake, "queue-remove", "--feed-id", FEED, "--pipeline-id", PIPE,
@@ -226,7 +268,12 @@ class TestReviewSafety(ERBase):
     def test_apply_does_not_toggle_off_an_existing_vote(self):
         """The vote endpoint is a toggle. Queueing 'like' on an entity that
         already has a live 'like' (liked in the UI, or by an earlier ad-hoc
-        `vote`) used to make `apply` silently REMOVE the like and report OK."""
+        `vote`) used to make `apply` silently REMOVE the like and report OK.
+        Uses FakeUbiquity's real toggle semantics (sending the same
+        vote_type twice removes it) to exercise the actual bug class, and
+        checks the entity's like survives apply (mutation-verified: removing
+        the apply_session already-present skip makes this fail with the
+        vote actually disappearing from the fake server's state)."""
         fake = FakeUbiquity(3, votes=[{"entity_id": 2, "vote_type": "like"}])
         self.run_cli(fake, "start", "--feed-id", FEED, "--pipeline-id", PIPE)
         self.run_cli(fake, "queue", "--feed-id", FEED, "--pipeline-id", PIPE,
@@ -237,7 +284,9 @@ class TestReviewSafety(ERBase):
 
     def test_fetch_entities_reads_every_page(self):
         """fetch_entities used to ask for limit=500 once and never page, so a
-        bigger feed was silently truncated in list/page/start/suggest."""
+        bigger feed was silently truncated in list/page/start/suggest. Uses
+        620 fake entities (past the old hardcoded ceiling) and asserts
+        len(ents) == total -- nothing silently dropped."""
         fake = FakeUbiquity(620)
         srv = h.FakeServer(fake.routes())
         with mock.patch.object(self.mod.request, "urlopen", srv):
@@ -245,6 +294,8 @@ class TestReviewSafety(ERBase):
         self.assertEqual(len(ents), total)
 
     def test_http_calls_have_a_timeout(self):
+        """Every `_call()` invocation must pass a timeout to urlopen -- a
+        dropped timeout would let a hung request block the script forever."""
         fake = FakeUbiquity(1)
         srv = h.FakeServer(fake.routes())
         with mock.patch.object(self.mod.request, "urlopen", srv):
@@ -255,7 +306,9 @@ class TestReviewSafety(ERBase):
         """Review sessions outlast the 30-minute access token. The script used
         to send the stored token without checking its expiry, so calls began
         failing with 401 midway through a review. It now goes through
-        ubiquity-auth's get_access_token, which refreshes first."""
+        ubiquity-auth's get_access_token, which refreshes first. Checks the
+        token returned equals a server-generated fresh value (not a static
+        mock), and that the request actually used grant_type=refresh_token."""
         data = json.loads(self.mod.TOKENS_PATH.read_text())
         data["access_expires_at"] = time.time() - 60
         self.mod.TOKENS_PATH.write_text(json.dumps(data))
@@ -270,7 +323,10 @@ class TestReviewSafety(ERBase):
 
     def test_queue_works_without_a_token_file(self):
         """queue / queue-remove only edit the local session file, so they
-        must not need (or crash without) the token file."""
+        must not need (or crash without) the token file. Deletes the token
+        file AFTER `start` (which does need it) then runs `queue` and fails
+        the test explicitly if a FileNotFoundError leaks out, rather than
+        letting unittest report a generic error."""
         fake = FakeUbiquity(3)
         self.run_cli(fake, "start", "--feed-id", FEED, "--pipeline-id", PIPE)
         self.mod.TOKENS_PATH.unlink()
