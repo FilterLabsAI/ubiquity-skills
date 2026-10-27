@@ -177,23 +177,23 @@ the fire-and-forget pattern from `ubiquity-understand-layer`'s
 `Runtime.evaluate` call has a short timeout that a direct
 `await fetch(...)` will blow through; fire the promise onto a `window`
 variable and poll it in a later call instead). Confirmed response shape
-(real example, entity 53920 "Rats in New York City", 12 total sources
+(real example, entity 88002 "Rats in New York City", 12 total sources
 across 6 affected feeds):
 ```json
 {
-  "entity_id": 53920, "entity_name": "Rats in New York City", "total_sources": 12,
+  "entity_id": 88002, "entity_name": "Rats in New York City", "total_sources": 12,
   "groups": [
     {"group_name": "Papua New Guinea", "source_count": 5,
-     "source_ids": [247013, 246948, 246914, 246667, 246652],
+     "source_ids": [91001, 91002, 91003, 91004, 91005],
      "urls": ["//en.wikipedia.org/wiki/Politics_of_Papua_New_Guinea", ...],
      "is_keeper": true},
     {"group_name": "Rats in New York City", "source_count": 4,
-     "source_ids": [262810, 236914, 236913, 236912], "urls": [...], "is_keeper": false},
+     "source_ids": [91006, 91007, 91008, 91009], "urls": [...], "is_keeper": false},
     {"group_name": "Artificial Intelligence Act", "source_count": 2, "source_ids": [...], "urls": [...], "is_keeper": false},
     {"group_name": "Liberal Democratic Federation of Hong Kong", "source_count": 1, "source_ids": [...], "urls": [...], "is_keeper": false}
   ],
   "discarded_urls": [],
-  "feeds_affected": [1668, 1640, 1619, 936, 1665, 1650]
+  "feeds_affected": [9004, 9006, 9007, 9008, 9003, 9009]
 }
 ```
 This targets exactly the "batch/crawl mismatch" problem (an entity whose
@@ -226,10 +226,10 @@ before trusting it.
 POST /api/locations/api/v1/entities/<entity_id>/split
 Content-Type: application/json
 {"groups": [
-  {"group_name": "Papua New Guinea", "source_ids": [247013, 246948, 246914, 246667, 246652]},
-  {"group_name": "Rats in New York City", "source_ids": [262810, 236914, 236913, 236912]},
-  {"group_name": "Artificial Intelligence Act", "source_ids": [258566, 246951]},
-  {"group_name": "Liberal Democratic Federation of Hong Kong", "source_ids": [245588]}
+  {"group_name": "Papua New Guinea", "source_ids": [91001, 91002, 91003, 91004, 91005]},
+  {"group_name": "Rats in New York City", "source_ids": [91006, 91007, 91008, 91009]},
+  {"group_name": "Artificial Intelligence Act", "source_ids": [91010, 91011]},
+  {"group_name": "Liberal Democratic Federation of Hong Kong", "source_ids": [91012]}
 ]}
 ```
 (same `groups` the preview returned, but each entry trimmed to just
@@ -237,20 +237,20 @@ Content-Type: application/json
 preview display-only and not sent back). `200 OK` response:
 ```json
 {
-  "original_entity_id": 53920, "original_entity_sources_kept": 5,
+  "original_entity_id": 88002, "original_entity_sources_kept": 5,
   "new_entities": [
-    {"id": 57941, "uuid": "4a3c44f8-...", "name": "Rats in New York City", "source_count": 4},
-    {"id": 57942, "uuid": "3cb22412-...", "name": "Artificial Intelligence Act", "source_count": 2},
-    {"id": 57943, "uuid": "864b4bba-...", "name": "Liberal Democratic Federation of Hong Kong", "source_count": 1}
+    {"id": 88003, "uuid": "4a3c44f8-...", "name": "Rats in New York City", "source_count": 4},
+    {"id": 88004, "uuid": "3cb22412-...", "name": "Artificial Intelligence Act", "source_count": 2},
+    {"id": 88005, "uuid": "864b4bba-...", "name": "Liberal Democratic Federation of Hong Kong", "source_count": 1}
   ],
   "discarded_urls": [],
-  "feeds_linked": [1668, 1640, 1619, 936, 1665, 1650]
+  "feeds_linked": [9004, 9006, 9007, 9008, 9003, 9009]
 }
 ```
 **Key mechanics, all confirmed live:**
 - The ORIGINAL `entity_id` is preserved and keeps whichever group was
   flagged `is_keeper` in the preview -- in this example that meant the
-  original id 53920 (still named "Rats in New York City" in its own
+  original id 88002 (still named "Rats in New York City" in its own
   metadata, unaffected by the group reassignment) now only carries the 5
   Papua-New-Guinea-topic sources, NOT the New-York-rats-topic sources its
   name suggests. **The entity's display `name` is NOT automatically

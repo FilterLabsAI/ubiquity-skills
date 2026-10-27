@@ -118,10 +118,17 @@ It flags, with file:line and the matched snippet:
 - email addresses (e.g. `<ACCOUNT_EMAIL>`)
 - UUIDs (v1-v5, lowercase/uppercase/mixed) -- pipeline IDs, saved-search
   IDs, location IDs and job IDs are UUIDs; they are environment-specific
-  and should not be hardcoded into shared docs. Feed IDs and entity/source
-  IDs are plain integers (e.g. `feed_id: 1234`), which the scanner does NOT
-  flag because bare numbers are everywhere in normal text; check those by
-  eye and replace them with `<FEED_ID>` / `<ENTITY_ID>`
+  and should not be hardcoded into shared docs
+- numeric feed/entity/source resource IDs (e.g. `feed_id: 1663`,
+  `--feed-id 1663`, `entity 53920`, `"source_ids": [247013, ...]`) --
+  low severity, not a secret, but still discloses which real
+  production feed/entity/pipeline was used while writing the doc.
+  Convention: replace the real number with a fake-but-plausible example
+  id, reused consistently for the same real id across one example/doc
+  (so a worked example with multiple cross-references stays internally
+  consistent) -- do NOT use a `<FEED_ID>`-style placeholder for these,
+  since worked examples read better with a concrete-looking number than
+  a bracketed token.
 - bearer tokens / JWTs (three base64url segments joined by `.`, or
   `Bearer <token>` strings)
 - generic API-key/secret/password/token assignments, in code or JSON form

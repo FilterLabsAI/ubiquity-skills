@@ -10,7 +10,7 @@ pulling raw content items directly from a feed's vector store, bypassing
 the Understand-layer endpoints (`artifacts/preview`, `metrics/preview` --
 see `ubiquity-understand-layer`). Source: user-provided swagger file
 (`doc.json`, swagger 2.0), confirmed live against the Germany pipeline
-(feed_id 1663) on 2026-10-02. Requires a valid Bearer token -- see
+(feed_id 9002) on 2026-10-02. Requires a valid Bearer token -- see
 `ubiquity-auth`.
 
 **When to use this skill:** whenever the user asks Hermes to directly
@@ -68,7 +68,7 @@ Understand-layer skills, NOT the pipeline/search UUID).
       "url": "...",
       "published_at": "2026-10-01T06:09:02Z",
       "scraped_at": "2026-10-01T17:07:20Z",
-      "entity_id": "50655",
+      "entity_id": "88001",
       "entity_type": "institution",
       "authors": "deutsche-bank",   // string (sometimes empty)
       "metrics": {"comments": 12, "likes": 193},  // seen on social/micro_blog items only (engagement counts); absent on article-type items
