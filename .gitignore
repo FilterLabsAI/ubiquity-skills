@@ -3,5 +3,5 @@ __pycache__/
 *.pyc
 .env
 
-# openapi-branded-pdf auto-build venv (local only, recreated by the hook)
+# openapi-branded-pdf build venv (local only, recreated as needed)
 .venv-openapi-pdf/
