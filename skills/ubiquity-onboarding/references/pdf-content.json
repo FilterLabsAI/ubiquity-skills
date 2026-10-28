@@ -1,47 +1,631 @@
 {
   "meta": {"company": "FilterLabs", "product": "Ubiquity API", "site": "filterlabs.ai"},
   "overview": {
-    "intro": "The Ubiquity API lets you build discovery pipelines that find and curate sources and entities for a topic and location, then track and refine the resulting feed over time.",
-    "stats_extra": [["3", "service families"]],
+    "intro": "Ubiquity discovers open-source signals, geotags and verifies them, and turns them into live feeds you can monitor, query and route into existing workflows. The API covers the full lifecycle of that platform: discover, stream and understand.",
+    "stats_extra": [["JWT", "bearer auth"]],
     "servers": {
-      "https://ubiquity.filterlabs.ai/api": "Main reverse-proxied backend for pipelines, feeds, jobs and search.",
-      "https://auth.filterlabs.ai": "Keycloak authentication server used to obtain and refresh access tokens.",
-      "https://agents.ubiquity.filterlabs.ai": "Self-serve trial signup service."
+      "https://ubiquity.filterlabs.ai/api": "Reverse-proxied backend (locations / orchestrator / understand services)",
+      "https://auth.filterlabs.ai": "Keycloak auth server (realm filter-labs-web, client web-app)",
+      "https://agents.ubiquity.filterlabs.ai": "Trial / preview signup site ('Ubiquity for Agents'): signup and health check only"
     },
-    "authentication": "Clients authenticate against the Keycloak server to obtain a Bearer access token, which is sent as an `Authorization: Bearer <token>` header on every request. Access tokens are short-lived and must be refreshed periodically using the refresh token issued at login.",
+    "authentication": "All endpoints except the token call and the two signup-site calls require a JWT, sent as `Authorization: Bearer ***`. Tokens come from the Keycloak token endpoint (realm filter-labs-web, client web-app) using the password grant, and are renewed with the refresh_token grant. Access tokens last about 30 minutes; refresh tokens last about 8 hours and rotate on use.",
     "families": [
-      ["/locations", "Locations service", "Pipelines, feeds, saved searches, jobs, entities, permissions and organizations."],
-      ["/orchestrator", "Orchestrator service", "Parses search queries and launches discovery jobs."],
-      ["/understand", "Understand service", "Conversational chat sessions and generated artifacts."]
+      ["/locations", "Locations", "Pipelines, feeds, entities, jobs, saved searches, sharing, media, direct data stream."],
+      ["/orchestrator", "Orchestrator", "Query parsing, discovery job launch, dataset-upload workflow."],
+      ["/understand", "Understand", "Ubi chat, artifacts, metric previews."],
+      ["/api/v1/signup, /health", "Signup site", "Trial account signup and health check (separate base URL, no token)."]
     ],
     "conventions": [
-      {"overview": true, "text": "All list endpoints support `limit` and `offset` query parameters for pagination."},
-      {"overview": false, "text": "Resource identifiers are UUIDs unless otherwise noted."}
+      {"overview": false, "text": "**Full replacements.** Several update calls are full replacements, not partial patches. Feed `PUT`, metric generator `PUT` and pipeline `PATCH` (whole `metadata` object) all drop fields you omit, so read the resource first and resend unchanged values."},
+      {"overview": false, "text": "**Identifiers.** `feed_id`, `entity_id` and entity source ids are integers; `pipeline_id`, `saved_search_id`, `job_id` and `session_id` are strings. For the user id, entity votes take the Keycloak UUID (the JWT `sub` claim) while the chat endpoints and the permissions endpoints take the account email."},
+      {"overview": true, "text": "**Paging.** List endpoints take `limit` and `offset`. The feed stream is different: it pages with an opaque cursor (returned as `next_cursor`) and has no offset."}
     ],
     "status_codes": [
-      ["200", "Request succeeded."],
-      ["201", "Resource created."],
-      ["400", "Invalid request or resource not found by a business-logic check."],
-      ["401", "Missing or expired access token."],
-      ["404", "Resource not found."],
-      ["500", "Unexpected server error."]
+      ["200 / 201", "Success; 201 is returned when a resource is created (pipelines, routes, feeds, saved searches)."],
+      ["202", "Accepted for background processing (source upload)."],
+      ["204", "Success with an empty body (deletes of routes and metric generators)."],
+      ["400", "Rejected request, for example `POST /pipelines` before its feed exists returns `{\"error\": \"Feed not found\"}`."],
+      ["404", "Not found, for example a media asset that is not stored, or an artifact that does not belong to the feed."],
+      ["422", "Validation error, returned as `{\"detail\": [{\"loc\": [...], \"msg\": \"Field required\"}]}`."],
+      ["500", "`POST /artifacts/preview` before any artifacts have been ingested (expected at that stage)."]
     ]
   },
   "workflow": {
-    "title": "Core workflow",
-    "lead": "A typical integration parses a query into a saved search, creates a pipeline and feed from it, launches a discovery job, and then polls the job until sources are ready for review.",
+    "title": "Core workflow: creating a pipeline",
+    "lead": "Pipeline creation is three ordered calls, each returning an id the next one needs. Launching a discovery job is a separate, optional fourth step.",
     "steps": [
-      ["1", "POST", "/orchestrator/search/unified", "Parse a free-text query into entities and a location.", "Parsed query", "Search setup"],
-      ["2", "POST", "/locations/api/v1/saved-searches", "Persist the parsed query and filters.", "Saved search id", "Pipeline creation"],
-      ["3", "POST", "/locations/v1/pipelines", "Create a pipeline from a saved search.", "Pipeline object", "Pipeline creation"],
-      ["4", "POST", "/orchestrator/api/v1/jobs/create", "Launch a discovery job for the pipeline.", "Job id", "Discovery"],
-      ["5", "GET", "/locations/api/v1/jobs/{job_id}", "Poll job status until completion.", "Job status/progress", "Discovery"]
+      ["1", "POST", "/locations/api/v1/saved-searches", "Save the parsed query and filters.", "id (saved_search_id)", "POST /pipelines"],
+      ["2", "POST", "/locations/api/v1/feeds", "Create the feed that will hold collected content.", "id (feed_id)", "POST /pipelines"],
+      ["3", "POST", "/locations/v1/pipelines", "Link the saved search and feed into a new pipeline.", "id (pipeline_id)", "PATCH, routes, jobs/create"],
+      ["4", "POST", "/orchestrator/api/v1/jobs/create", "Optional. Start discovery; poll with GET /locations/api/v1/jobs/{job_id}.", "id (job_id)", "GET /jobs/{job_id}"]
+    ],
+    "sections": [
+      {"overview": true, "heading": "Where the inputs come from", "text": "The query is first parsed by `POST /search/unified`. Its `location.id` becomes the saved search's `search_filters.location_uuid`, its parsed locations, topics and entity types are flattened into `search_filters.entities`, and its `session_id` is passed to `POST /pipelines`."},
+      {"overview": true, "heading": "Importing your own sources", "text": "Add URLs with `POST /feeds/{feed_id}/sources/upload` (returns 202), or upload a behavioral dataset with `POST /orchestrator/workflows/dataset-upload/trigger` and poll its status endpoint until it completes."},
+      {"overview": false, "text": "Send `{\"message\": \"...\"}` to the session messages endpoint. The call is synchronous, so the reply, including any `filter_update`, comes back in the same response and no polling is needed. The session is created implicitly if it does not exist yet.", "heading": "Ubi chat in one call"},
+      {"overview": false, "heading": "Checking ingestion progress", "text": "Use `GET /understand/artifacts/count/{feed_id}` for a fast, inexpensive count of ingested artifacts. It is cheaper than reading `total_count` from `artifacts/preview`."},
+      {"overview": false, "heading": "Getting a trial account", "text": "Send an email address (first and last name are optional) to `POST /api/v1/signup` on the signup site; no token is needed. The call is idempotent: re-submitting an existing email returns the same `user_id` with `created=false` and does not send another invite."},
+      {"overview": false, "heading": "Sharing a pipeline", "text": "A pipeline can only be shared with members of your own organizations; arbitrary email invites are not supported. List your organizations, list the members of one, then grant access with a `PUT` to the pipeline's permissions."},
+      {"overview": false, "heading": "Reading media", "text": "Stream items from platforms that capture media carry a `media_assets` list. Pass an asset's ids to the media endpoint to get a presigned download URL that expires after about 5 minutes."}
     ]
   },
-  "reference_note": "Endpoints are grouped by service below.",
+  "reference_note": "Example request bodies use placeholder values in angle brackets; response structures show field names with their types, and `...` where the type is not documented yet.",
   "param_notes": {
     "limit": "Page size for list results.",
     "offset": "Number of results to skip, for pagination."
   },
-  "endpoints": {}
+  "groups": [
+    {"name": "01 Authentication", "blurb": "Keycloak-issued JWTs, sent as a Bearer token on every other call.",
+     "match": [{"exact": "/realms/filter-labs-web/protocol/openid-connect/token"}]},
+    {"name": "02 Trial Signup & Health", "blurb": "Create a trial account and check service health. Both calls are served by the signup site (a separate base URL) and need no token.",
+     "match": [{"exact": "/api/v1/signup"}, {"exact": "/health"}]},
+    {"name": "03 Search & Locations", "blurb": "Turn a free-text query into structured entities and look up places.",
+     "match": [{"exact": "/orchestrator/search/unified"}, {"exact": "/locations/v1/locations"}, {"exact": "/locations/v1/locations/{location_uuid}"}]},
+    {"name": "04 Pipelines & Routing", "blurb": "Pipelines tie a saved search to a feed; routes pass results between pipelines.",
+     "match": [{"exact": "/locations/v1/pipelines"}, {"exact": "/locations/v1/pipelines/{pipeline_id}"}, {"exact": "/locations/v1/pipelines/{pipeline_id}/routes"}, {"exact": "/locations/v1/pipelines/{pipeline_id}/routes/{route_id}"}]},
+    {"name": "05 Sharing & Permissions", "blurb": "Find who a pipeline can be shared with, and manage who has access.",
+     "match": [{"exact": "/locations/v1/organizations"}, {"exact": "/locations/v1/permissions/organization/{org_uuid}"}, {"exact": "/locations/v1/permissions/pipeline/{pipeline_id}"}, {"exact": "/locations/v1/permissions/pipeline/{pipeline_id}/{email}"}]},
+    {"name": "06 Saved Searches & Feeds", "blurb": "Feeds hold the stream of collected content and its media; metric generators score it.",
+     "match": [{"exact": "/locations/api/v1/feeds"}, {"exact": "/locations/api/v1/feeds/{feed_id}"}, {"exact": "/locations/api/v1/feeds/{feed_id}/metric_prompts"}, {"exact": "/locations/api/v1/feeds/{feed_id}/metric_prompts/{metric_id}"}, {"exact": "/locations/api/v1/feeds/{feed_id}/stream"}, {"exact": "/locations/api/v1/feeds/{feed_id}/media/{artifact_uuid}/{asset_id}"}, {"exact": "/locations/api/v1/saved-searches"}, {"exact": "/locations/api/v1/saved-searches/{saved_search_id}"}]},
+    {"name": "07 Entities & Review", "blurb": "Review, vote on, split and remove the sources and datasets Ubiquity discovers.",
+     "match": [{"exact": "/locations/v1/entity-votes/toggle"}, {"exact": "/locations/v1/entity-votes/pipeline/{pipeline_id}"}, {"exact": "/locations/api/v1/feeds/{feed_id}/entities"}, {"exact": "/locations/api/v1/feeds/{feed_id}/entities/{entity_id}"}, {"exact": "/locations/api/v1/entities/{entity_id}/split-preview"}, {"exact": "/locations/api/v1/entities/{entity_id}/split"}, {"exact": "/locations/api/v1/entities/{entity_id}"}, {"exact": "/locations/api/v1/source-evaluation-logs/by-url"}]},
+    {"name": "08 Import Sources", "blurb": "Bring your own URLs or behavioral datasets into a feed.",
+     "match": [{"exact": "/locations/api/v1/feeds/{feed_id}/sources/upload"}, {"exact": "/orchestrator/workflows/dataset-upload/trigger"}, {"exact": "/orchestrator/workflows/dataset-upload/{job_id}/status"}]},
+    {"name": "09 Discovery Jobs", "blurb": "Launch, monitor and cancel agentic discovery work.",
+     "match": [{"exact": "/orchestrator/api/v1/jobs/create"}, {"exact": "/locations/api/v1/jobs/{job_id}"}, {"exact": "/locations/api/v1/jobs/{job_id}/status"}, {"exact": "/locations/api/v1/jobs"}, {"exact": "/locations/api/v1/jobs/count"}, {"exact": "/locations/api/v1/jobs/count/status/{status}"}, {"exact": "/orchestrator/jobs/{job_id}/async-status"}]},
+    {"name": "10 Understand", "blurb": "Per-feed chat with Ubi, plus artifact and metric data for the Data Browser.",
+     "match": [{"exact": "/understand/chat/sessions"}, {"exact": "/understand/chat/sessions/{session_id}"}, {"exact": "/understand/chat/sessions/{session_id}/messages"}, {"exact": "/understand/artifacts/count/{feed_id}"}, {"exact": "/understand/artifacts/preview"}, {"exact": "/understand/metrics/preview"}]}
+  ],
+  "endpoints": {
+    "POST /realms/filter-labs-web/protocol/openid-connect/token": {
+      "desc": "Log in or refresh a token (Keycloak password and refresh_token grants).",
+      "notes": ["Send the body form-encoded. Use `grant_type=password` with `username` and `password` to log in, or `grant_type=refresh_token` with `refresh_token` to renew."],
+      "fields": {"grant_type": "One of: `password`, `refresh_token`."},
+      "example": "grant_type=password&client_id=web-app&username=<email>&password=<password>\n\ngrant_type=refresh_token&client_id=web-app&refresh_token=<refresh_token>",
+      "responses": {
+        "200": {"text": "Tokens issued. The access token lasts about 30 minutes; the refresh token about 8 hours and rotates, so always store the newest one.",
+                "shape": "{\n  \"access_token\": \"<JWT, ~30 min lifetime>\",\n  \"refresh_token\": \"<token, ~8 h lifetime, rotates on use>\",\n  ...\n}"}
+      }
+    },
+    "POST /api/v1/signup": {
+      "desc": "Create a trial / preview account. No token needed; served by the signup site.",
+      "notes": ["Served by the signup site (`https://agents.ubiquity.filterlabs.ai`), not the main backend. No Bearer token is needed.",
+                "Idempotent: submitting an email that already has an account returns the same `user_id` with `created` and `invited` false. No second invite is sent and no duplicate is created.",
+                "No deliverability or domain check is performed, so a syntactically valid but undeliverable address is created the same as a real one."],
+      "fields": {
+        "first_name": "Optional. Omit the field entirely when blank; do not send an empty string.",
+        "last_name": "Optional. Same omit-if-blank behavior as `first_name`."
+      },
+      "responses": {
+        "200": {"text": "Account created, or already existing. `created` and `invited` are both true only for a genuinely new signup.",
+                "shape": "{\n  \"user_id\": ...,\n  \"email\": \"<string>\",\n  \"created\": <boolean>,\n  \"licensed\": ...,\n  \"invited\": <boolean>\n}"}
+      }
+    },
+    "GET /health": {
+      "desc": "Health check for the signup site's backend. No token needed.",
+      "notes": ["Served by the signup site (`https://agents.ubiquity.filterlabs.ai`), not the main backend. No Bearer token is needed.",
+                "The signup API is hosted as part of the Scout search service, which is the service name reported here."],
+      "responses": {
+        "200": {"text": "Service status.",
+                "shape": "{\n  \"status\": ...,\n  \"service\": \"ubiquity-scout\",\n  \"auth_disabled\": ...,\n  \"twitter\": { \"configured\": ... },\n  \"license\": { \"role\": ..., \"enforced\": ... },\n  \"signup\": { \"configured\": ... },\n  \"usage\": { \"daily_limit\": ..., \"backend\": ... }\n}"}
+      }
+    },
+    "POST /orchestrator/search/unified": {
+      "desc": "Parse a free-text query into location, topic and entity-type entities. Also the refine loop for the Discover chat.",
+      "notes": ["For the first turn send only `query` (plus optional limits). For each refine turn (change location, add a place, adjust topics and similar), call this same endpoint again and add `prior_query`, `prior_entities`, `prior_context` and `session_id`, each copied verbatim from the previous response.",
+                "Each parsed entity carries `value`, `type`, `confidence`, `normalized_value`, `aliases`, `metadata` and `languages`."],
+      "fields": {
+        "prior_query": "Refine turns only: previous turn's `query` string, verbatim.",
+        "prior_entities": "Refine turns only: previous turn's `parsed_entities` object, verbatim.",
+        "prior_context": "Refine turns only: previous turn's `context_report` string, verbatim.",
+        "session_id": "Refine turns only: previous turn's response `session_id`, verbatim."
+      },
+      "responses": {
+        "200": {"text": "Parsed query. Pass `session_id` on to `POST /pipelines` and on to the next refine turn.",
+                "shape": "{\n  \"query\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"parsed_entities\": {\n    \"locations\": [...],\n    \"topics\": [...],\n    \"entity_types\": [...],\n    \"persons\": [...],\n    \"organizations\": [...],\n    \"events\": [...]\n  },\n  \"context_report\": \"<string>\",\n  \"location\": {\n    \"id\": \"<uuid>\",\n    \"name\": \"<string>\",\n    \"country\": \"<string>\",\n    \"coordinates\": ...,\n    \"bounding_box\": ...,\n    \"is_multi_location\": <boolean>,\n    \"component_locations\": [...]\n  },\n  \"entity_changes\": { \"added\": [...], \"removed\": [...], \"modified\": [...] },\n  \"existing_sources\": [...],\n  \"discovery_job_id\": \"<string>\",\n  \"suggestions\": [...],\n  \"stats\": {...},\n  \"confidence\": ...,\n  \"reasoning\": \"<string>\"\n}"}
+      }
+    },
+    "GET /locations/v1/locations": {
+      "desc": "Search locations already in Ubiquity by name (not a geocoder). Pages with limit and offset.",
+      "notes": ["Searches only locations that already exist in Ubiquity. It is not a geocoder, and a place that has not been added through the unified search / discovery workflow will not appear.",
+                "`q` filters by name, and `offset` pages through results with no overlap between pages."],
+      "fields": {"q": "Search text."},
+      "responses": {
+        "200": {"text": "Location matches, returned inside a double-nested envelope.",
+                "shape": "{\n  \"data\": {\n    \"data\": [ ...location matches... ]\n  }\n}"}
+      }
+    },
+    "GET /locations/v1/locations/{location_uuid}": {
+      "desc": "Get a location object (may be a synthesized COMBINED- location).",
+      "fields": {"location_uuid": "Location UUID."},
+      "responses": {
+        "200": {"text": "The location.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"name\": \"<string>\",\n  \"abbreviation\": \"<string>\",\n  \"country\": \"<string>\",\n  \"coordinates\": ...,\n  \"bounding_box\": ...\n}"}
+      }
+    },
+    "GET /locations/v1/pipelines": {
+      "desc": "List pipelines.",
+      "fields": {"order_by": "Field to sort by, for example `created_at`.", "order": "One of: `ASC`, `DESC`.", "saved_search_id": "Saved-search id (returned by `POST /saved-searches`)."},
+      "responses": {
+        "200": {"text": "Array of pipeline objects. Shape of one element:",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"saved_search_id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"auto_sync_enabled\": <boolean>,\n  \"sync_on_job_completion\": <boolean>,\n  \"sync_on_map_change\": <boolean>,\n  \"metadata\": {},\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "POST /locations/v1/pipelines": {
+      "desc": "Create a pipeline from an existing saved search and feed (step 3 of creation).",
+      "notes": ["Must follow `POST /saved-searches` and `POST /feeds`. Calling it alone fails with a 400 `{\"error\": \"Feed not found\"}`.",
+                "Creating a pipeline does not start discovery. Launching discovery is a separate, optional step (`PATCH` the pipeline, then `POST /jobs/create`)."],
+      "fields": {
+        "saved_search_id": "Id from the preceding saved-searches POST.",
+        "feed_id": "Id from the preceding feeds POST.",
+        "session_id": "`session_id` from the originating `/search/unified` response."
+      },
+      "responses": {
+        "201": {"text": "Pipeline created.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"saved_search_id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"auto_sync_enabled\": <boolean>,\n  \"sync_on_job_completion\": <boolean>,\n  \"sync_on_map_change\": <boolean>,\n  \"metadata\": {},\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "GET /locations/v1/pipelines/{pipeline_id}": {
+      "desc": "Get a pipeline: feed_id, agent_config, discovery_config, search_filters.",
+      "fields": {"pipeline_id": "Pipeline id."},
+      "responses": {
+        "200": {"text": "The pipeline object. Once settings are saved, `metadata` carries `agent_config` and `discovery_config`; the object also exposes `feed_id` and `search_filters`.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"saved_search_id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"auto_sync_enabled\": <boolean>,\n  \"sync_on_job_completion\": <boolean>,\n  \"sync_on_map_change\": <boolean>,\n  \"metadata\": {},\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "PUT /locations/v1/pipelines/{pipeline_id}": {
+      "desc": "Full update, for example a rename.",
+      "fields": {"pipeline_id": "Pipeline id."},
+      "responses": {
+        "200": {"text": "The updated pipeline object.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"saved_search_id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"auto_sync_enabled\": <boolean>,\n  \"sync_on_job_completion\": <boolean>,\n  \"sync_on_map_change\": <boolean>,\n  \"metadata\": {},\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "PATCH /locations/v1/pipelines/{pipeline_id}": {
+      "desc": "Update metadata.agent_config and discovery_config. This is the Agent Settings save call; resend the whole metadata object.",
+      "notes": ["The whole `metadata` object must be re-sent; a partial diff is not supported.",
+                "Quick Presets (Balanced, Social Media Boost, News Focus, Behavioral Datasets Boost) are client-side form state only. Nothing is stored until this call is made.",
+                "Also used right before `POST /jobs/create` to set `discovery_config` defaults."],
+      "fields": {
+        "pipeline_id": "Pipeline id.",
+        "metadata.agent_config.search_generation.custom_instructions": "Free-text instructions for the search generation agent."
+      },
+      "responses": {
+        "200": {"text": "The full updated pipeline object, with the new metadata.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"saved_search_id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"auto_sync_enabled\": <boolean>,\n  \"sync_on_job_completion\": <boolean>,\n  \"sync_on_map_change\": <boolean>,\n  \"metadata\": {},\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "GET /locations/v1/pipelines/{pipeline_id}/routes": {
+      "desc": "List routes (fan-in / fan-out) for a pipeline.",
+      "fields": {"pipeline_id": "Pipeline id."},
+      "responses": {
+        "200": {"text": "Array of routes. Source and destination pipeline names and feed_id are denormalized onto each one.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"source_pipeline_id\": \"<string>\",\n  \"destination_pipeline_id\": \"<string>\",\n  \"source_pipeline_name\": \"<string>\",\n  \"destination_pipeline_name\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"enabled\": <boolean>,\n  \"filter_mode\": \"<string>\",\n  \"filter_config\": {}\n}"}
+      }
+    },
+    "POST /locations/v1/pipelines/{pipeline_id}/routes": {
+      "desc": "Create a route from this pipeline to a destination pipeline.",
+      "notes": ["`filter_mode` and `filter_config` are accepted and stored. Their effect on what flows through the route is not documented yet."],
+      "fields": {
+        "pipeline_id": "Pipeline id.",
+        "filter_mode": "Defaults to `all`. Accepted and stored (for example `liked_only`). Effect on routing is not documented yet.",
+        "filter_config": "Defaults to `{}`. Accepted and stored. Effect on routing is not documented yet."
+      },
+      "responses": {
+        "201": {"text": "Route created.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"source_pipeline_id\": \"<string>\",\n  \"destination_pipeline_id\": \"<string>\",\n  \"enabled\": <boolean>,\n  \"filter_mode\": \"<string>\",\n  \"filter_config\": {}\n}"}
+      }
+    },
+    "DELETE /locations/v1/pipelines/{pipeline_id}/routes/{route_id}": {
+      "desc": "Delete a route.",
+      "fields": {"pipeline_id": "Pipeline id.", "route_id": "Route id."},
+      "responses": {"204": {"text": "Empty body."}}
+    },
+    "GET /locations/v1/organizations": {
+      "desc": "List the organizations the current user belongs to.",
+      "notes": ["Sharing targets must already be members of one of these organizations; arbitrary email invites are not supported."],
+      "responses": {
+        "200": {"text": "Array of organizations. Most accounts see exactly one. Shape of one element:",
+                "shape": "{\n  \"name\": \"<string>\",\n  \"uuid\": \"<string>\",\n  \"licensed_seats\": <integer>\n}"}
+      }
+    },
+    "GET /locations/v1/permissions/organization/{org_uuid}": {
+      "desc": "List members of an organization: the only valid pipeline-sharing targets.",
+      "notes": ["Despite its name, `keycloak_user_id` here is the member's email, not a UUID. `ability` is the organization-level baseline, not access to a particular pipeline."],
+      "fields": {"org_uuid": "Organization UUID (from `GET /organizations`)."},
+      "responses": {
+        "200": {"text": "Array of organization members. Shape of one element:",
+                "shape": "{\n  \"ability\": \"<string>\",\n  \"keycloak_user_id\": \"<the member's email>\"\n}"}
+      }
+    },
+    "GET /locations/v1/permissions/pipeline/{pipeline_id}": {
+      "desc": "List current sharing grants for a pipeline.",
+      "notes": ["Same shape as the organization members response."],
+      "fields": {"pipeline_id": "Pipeline id."},
+      "responses": {
+        "200": {"text": "Array of current sharing grants, in the same shape as the organization members response:",
+                "shape": "{\n  \"ability\": \"<string>\",\n  \"keycloak_user_id\": \"<the member's email>\"\n}"}
+      }
+    },
+    "PUT /locations/v1/permissions/pipeline/{pipeline_id}/{email}": {
+      "desc": "Grant an organization member access to a pipeline.",
+      "notes": ["Send the email as a plain path segment, not URL-encoded.",
+                "The Share dialog grants `write` when Edit is checked, and `write` implies read. The value for view-only access is not documented yet; try `read` and check the result with `GET /permissions/pipeline/{pipeline_id}`."],
+      "fields": {
+        "pipeline_id": "Pipeline id.",
+        "email": "Target user's email, sent as a plain (not URL-encoded) path segment.",
+        "ability": "Use `write` (implies read). The value for view-only access is not documented yet."
+      },
+      "responses": {"200": {"text": "Access granted."}}
+    },
+    "POST /locations/api/v1/feeds": {
+      "desc": "Create the feed resource (step 2 of pipeline creation).",
+      "notes": ["Must run before `POST /pipelines`. The returned id is the numeric `feed_id` used throughout the API."],
+      "fields": {"metadata.description": "Free-text description, for example `Feed for search: <query text>`."},
+      "responses": {
+        "201": {"text": "Feed created.",
+                "shape": "{\n  \"id\": <integer>,\n  \"uuid\": \"<string>\",\n  \"name\": \"<string>\",\n  \"refresh_interval\": { \"Microseconds\": ..., \"Days\": ..., \"Months\": ..., \"Valid\": false },\n  \"metadata\": \"<base64>\",\n  \"keycloak_user_id\": \"<string>\",\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "GET /locations/api/v1/feeds/{feed_id}": {
+      "desc": "Get a feed, including its refresh interval.",
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`)."},
+      "responses": {
+        "200": {"text": "The feed. Here the refresh interval is returned as a human-readable string.",
+                "shape": "{\n  \"id\": <integer>,\n  \"uuid\": \"<string>\",\n  \"name\": \"<string>\",\n  \"refresh_interval\": \"<human-readable, e.g. '12 hours'>\",\n  ...\n}"}
+      }
+    },
+    "PUT /locations/api/v1/feeds/{feed_id}": {
+      "desc": "Full update: rename, refresh and detection intervals, review settings. GET first and resend unchanged fields.",
+      "notes": ["Full PUT, not a partial update: omitted fields (including the feed's own `metadata`) are reset to null or default. GET the feed first and resend unchanged values.",
+                "`refresh_interval_minutes` is the same field behind the Enable Ubi toggle."],
+      "fields": {
+        "feed_id": "Numeric feed id (returned by `POST /feeds`).",
+        "name": "Must be re-sent (full PUT).",
+        "refresh_interval_minutes": "0 = do not update; 720 = 12 h; 1440 = daily; 2880 = every 2 days; 10080 = weekly; about 43200 = monthly.",
+        "deletion_detection_interval_minutes": "Settable by direct PUT. Effect on background jobs is not documented yet.",
+        "engagement_detection_interval_minutes": "Settable by direct PUT. Effect on background jobs is not documented yet.",
+        "automatic_entity_rediscovery_interval_minutes": "Settable by direct PUT. Effect on background jobs is not documented yet.",
+        "force_review_for_auto_discover": "Settable by direct PUT.",
+        "backdate_limit": "int32. Probably a day count (unit not documented yet). A date string such as `YYYY-MM-DD` is rejected with a 400."
+      },
+      "responses": {
+        "200": {"text": "The updated feed. Interval fields come back as a struct.",
+                "shape": "{\n  \"id\": <integer>,\n  \"name\": \"<string>\",\n  \"refresh_interval\": { \"Microseconds\": ..., \"Days\": ..., \"Months\": ..., \"Valid\": <boolean> },\n  \"refreshed_at\": \"<timestamp>\",\n  ...\n}"}
+      }
+    },
+    "GET /locations/api/v1/feeds/{feed_id}/metric_prompts": {
+      "desc": "List metric generators for a feed.",
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`)."},
+      "responses": {
+        "200": {"text": "Array of metric generators, or null when the feed has none. Shape of one element:",
+                "shape": "{\n  \"id\": <string>,\n  \"feed_id\": <integer>,\n  \"name\": \"<string>\",\n  \"metric_name\": \"<string>\",\n  \"prompt\": \"<string>\",\n  \"filter_prompt\": \"<string> | null\",\n  \"filter_distance\": <number> | null,\n  \"active\": <boolean>,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "POST /locations/api/v1/feeds/{feed_id}/metric_prompts": {
+      "desc": "Create a metric generator.",
+      "notes": ["`filter_prompt` and `filter_distance` are accepted and stored. Their effect is not documented yet."],
+      "fields": {
+        "feed_id": "Numeric feed id (returned by `POST /feeds`).",
+        "metric_name": "Slug of `name`, generated by the client.",
+        "filter_prompt": "Intended as a semantic pre-filter that gates which artifacts get scored. Accepted and stored. Effect is not documented yet. May be null.",
+        "filter_distance": "Likely a vector-distance cutoff for that pre-filter. Accepted and stored. Effect is not documented yet. May be null."
+      },
+      "responses": {
+        "200": {"text": "Metric generator created.",
+                "shape": "{\n  \"id\": <string>,\n  \"feed_id\": <integer>,\n  \"name\": \"<string>\",\n  \"metric_name\": \"<string>\",\n  \"prompt\": \"<string>\",\n  \"filter_prompt\": \"<string> | null\",\n  \"filter_distance\": <number> | null,\n  \"active\": <boolean>,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "PUT /locations/api/v1/feeds/{feed_id}/metric_prompts/{metric_id}": {
+      "desc": "Edit a metric generator (full PUT only).",
+      "notes": ["This resource takes full PUT only; there is no partial PATCH. Prefer this call over creating a replacement."],
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`).", "metric_id": "Metric generator id."},
+      "responses": {
+        "200": {"text": "The updated metric generator.",
+                "shape": "{\n  \"id\": <string>,\n  \"feed_id\": <integer>,\n  \"name\": \"<string>\",\n  \"metric_name\": \"<string>\",\n  \"prompt\": \"<string>\",\n  \"filter_prompt\": \"<string> | null\",\n  \"filter_distance\": <number> | null,\n  \"active\": <boolean>,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "DELETE /locations/api/v1/feeds/{feed_id}/metric_prompts/{metric_id}": {
+      "desc": "Delete a metric generator.",
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`).", "metric_id": "Metric generator id."},
+      "responses": {"204": {"text": "Empty body."}}
+    },
+    "GET /locations/api/v1/feeds/{feed_id}/stream": {
+      "desc": "Direct Data Feed API: raw content items for the full corpus, with date, text, entity and URL filters, plus media asset metadata.",
+      "notes": ["Returns the full corpus with no 1000-item display cap, so it suits direct analysis of feed content.",
+                "Page through the corpus with `cursor`: pass `pagination.next_cursor` from each response back verbatim as `cursor` until `has_more` is false.",
+                "`media_assets` appears only on items whose source platform supports media capture; otherwise the key is absent (not an empty array). Use `GET /feeds/{feed_id}/media/{artifact_uuid}/{asset_id}` to download a stored asset."],
+      "fields": {
+        "feed_id": "feed_id.",
+        "limit": "Range 1 to 1000. Default: 100.",
+        "cursor": "Opaque token (base64-encoded JSON) returned as `next_cursor` in the previous response. Pass it back verbatim; do not decode or construct it.",
+        "order_by": "`published_at` can be null (no usable date, or unparseable), and items with a null `published_at` are silently skipped under the default ordering. `scraped_at` is set at ingest and is never null. Use `order_by=scraped_at` to retrieve every artifact in the feed; the default ordering does not guarantee completeness. One of: `published_at`, `scraped_at`. Default: `published_at`.",
+        "content_max_length": "Range 0 to 10000. Default: 500.",
+        "date_from": "Start date, exclusive. RFC3339 or `YYYY-MM-DD`.",
+        "date_to": "End date, inclusive. RFC3339 or `YYYY-MM-DD`.",
+        "entity_types": "Comma-separated: `institution`, `individual`."
+      },
+      "responses": {
+        "200": {"text": "A page of raw content items.",
+                "shape": "{\n  \"items\": [\n    {\n      \"uuid\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"content\": \"<string, truncated to content_max_length>\",\n      \"url\": \"<string>\",\n      \"published_at\": \"<timestamp>\",\n      \"scraped_at\": \"<timestamp>\",\n      \"entity_id\": <integer>,\n      \"entity_type\": \"<institution | individual>\",\n      \"authors\": [...],\n      \"metrics\": {...},\n      \"media_assets\": [\n        {\n          \"asset_id\": \"<string>\",\n          \"position\": <integer>,\n          \"kind\": \"<image | video | thumbnail>\",\n          \"status\": \"<stored | failed | unavailable_logged_out>\",\n          \"source_url\": \"<string>\",\n          \"storage_key\": \"<string>\",\n          \"sha256\": \"<string>\",\n          \"mime\": \"<string>\",\n          \"bytes\": <integer>,\n          \"duration_s\": <number>\n        }\n      ]\n    }\n  ],\n  \"pagination\": {\n    \"limit\": <integer>,\n    \"total\": <integer>,\n    \"has_more\": <boolean>,\n    \"next_cursor\": \"<opaque string> | null\"\n  }\n}"}
+      }
+    },
+    "GET /locations/api/v1/feeds/{feed_id}/media/{artifact_uuid}/{asset_id}": {
+      "desc": "Resolve a stored media asset from a stream item to a short-lived presigned download URL.",
+      "notes": ["Only assets with status `stored` can be retrieved. Find them in the `media_assets` list of an item from `GET /feeds/{feed_id}/stream`.",
+                "`artifact_uuid` is the stream item's own `uuid`, not its `entity_id`.",
+                "The returned URL expires after about 5 minutes; request a new one if needed."],
+      "fields": {
+        "feed_id": "Numeric feed id. It must be the feed the artifact belongs to: a different feed returns 404 \"Artifact not found\", and an unknown feed returns 400 \"Feed not found\".",
+        "artifact_uuid": "The stream item's own `uuid` field (not `entity_id`).",
+        "asset_id": "The `media_assets` entry's `asset_id`."
+      },
+      "responses": {
+        "200": {"text": "Download link for the asset. The `url` is a presigned GET URL that needs no further auth and serves the raw file bytes directly.",
+                "shape": "{\n  \"asset_id\": \"<string>\",\n  \"kind\": \"<string>\",\n  \"mime\": \"<string>\",\n  \"bytes\": <integer>,\n  \"url\": \"<presigned URL, ~5 min lifetime>\",\n  \"expires_at\": \"<timestamp>\"\n}"},
+        "404": {"text": "Returned as `{\"error\": \"Media not found\"}` when the asset's status is `failed` or `unavailable_logged_out` (only `stored` assets can be served), or `{\"error\": \"Artifact not found\"}` when the `artifact_uuid` does not belong to the given feed."},
+        "400": {"text": "Returned as `{\"error\": \"Feed not found\"}` when the `feed_id` does not exist."}
+      }
+    },
+    "POST /locations/api/v1/saved-searches": {
+      "desc": "Persist the parsed query and filters (step 1 of pipeline creation).",
+      "fields": {
+        "name": "Query text, used as the default pipeline name.",
+        "search_query": "Same query text.",
+        "search_filters.entities": "Flattened `parsed_entities.locations` + `.topics` + `.entity_types` from the preceding `/search/unified` response, each entry's value/type/confidence/normalized_value/aliases/metadata/languages kept verbatim.",
+        "search_filters.location_uuid": "`location.id` from `/search/unified`."
+      },
+      "responses": {
+        "201": {"text": "Saved search created.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"name\": \"<string>\",\n  \"search_query\": \"<string>\",\n  \"search_filters\": { ... },\n  \"is_default\": <boolean>,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "PUT /locations/api/v1/saved-searches/{saved_search_id}": {
+      "desc": "Re-save a pipeline's search query and filters.",
+      "fields": {"saved_search_id": "Saved-search id (returned by `POST /saved-searches`)."},
+      "responses": {
+        "200": {"text": "The updated saved-search object (same shape as the create response).",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"name\": \"<string>\",\n  \"search_query\": \"<string>\",\n  \"search_filters\": { ... },\n  \"is_default\": <boolean>,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "POST /locations/v1/entity-votes/toggle": {
+      "desc": "Like, dislike or flag an entity. Repeating the same vote type removes it.",
+      "notes": ["This is a true toggle: sending the same `vote_type` again removes the vote and returns `action: \"removed\"`.",
+                "`keycloak_user_id` here is the user UUID (the JWT `sub` claim), not the email. The chat endpoints use the opposite convention."],
+      "fields": {"keycloak_user_id": "Keycloak user UUID (the JWT `sub` claim), not the email."},
+      "responses": {
+        "200": {"text": "Vote removed (the same `vote_type` was sent twice).", "shape": "{\n  \"action\": \"removed\",\n  \"vote\": {...}\n}"},
+        "201": {"text": "Vote created.", "shape": "{\n  \"action\": \"created\",\n  \"vote\": {...}\n}"}
+      }
+    },
+    "GET /locations/v1/entity-votes/pipeline/{pipeline_id}": {
+      "desc": "List current votes for a pipeline.",
+      "fields": {"pipeline_id": "Pipeline id."},
+      "responses": {"200": {"text": "Array of vote objects; `[]` if there are none."}}
+    },
+    "GET /locations/api/v1/feeds/{feed_id}/entities": {
+      "desc": "List discovered entities (sources and datasets) for a feed, with search, sort and type filters.",
+      "notes": ["A CSV export of a feed is built on the client by combining this call (`limit=1000`, `offset=0`) with `GET /entity-votes/pipeline/{pipeline_id}?limit=500`. There is no dedicated export endpoint."],
+      "fields": {
+        "feed_id": "Numeric feed id (returned by `POST /feeds`).",
+        "type": "`sources` is documented; `datasets` is not documented yet (expected to follow the same pattern). One of: `all`, `sources`, `datasets`."
+      },
+      "responses": {
+        "200": {"text": "Page of entities plus counts.",
+                "shape": "{\n  \"entities\": [...],\n  \"total\": <integer>,\n  \"dataset_count\": <integer>,\n  \"source_count\": <integer>\n}"}
+      }
+    },
+    "DELETE /locations/api/v1/feeds/{feed_id}/entities/{entity_id}": {
+      "desc": "Remove an entity from a feed (hard delete).",
+      "notes": ["Hard delete; it cannot be undone."],
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`).", "entity_id": "Numeric entity id."},
+      "responses": {"200": {"text": "Entity removed.", "shape": "{\n  \"message\": \"Entity removed from feed successfully\"\n}"}}
+    },
+    "GET /locations/api/v1/entities/{entity_id}/split-preview": {
+      "desc": "AI-cluster an entity's source URLs by topic, as a preview before splitting. Slow.",
+      "notes": ["Slow (several seconds) because it uses AI clustering; use a generous timeout.",
+                "`is_keeper` does not reliably land on the group that matches the entity's name, so inspect each preview.",
+                "A \"No split needed\" result can occasionally appear under rapid repeated calls; retry if you expect a split."],
+      "fields": {"entity_id": "Numeric entity id."},
+      "responses": {
+        "200": {"text": "Proposed grouping of the entity's sources.",
+                "shape": "{\n  \"entity_id\": <integer>,\n  \"entity_name\": \"<string>\",\n  \"total_sources\": <integer>,\n  \"groups\": [\n    {\n      \"group_name\": \"<string>\",\n      \"source_count\": <integer>,\n      \"source_ids\": [<integer>, ...],\n      \"urls\": [\"<string>\", ...],\n      \"is_keeper\": <boolean>\n    }\n  ],\n  \"discarded_urls\": [...],\n  \"feeds_affected\": [...]\n}"}
+      }
+    },
+    "POST /locations/api/v1/entities/{entity_id}/split": {
+      "desc": "Commit a previewed split. Destructive and cross-feed.",
+      "notes": ["Destructive and cross-feed. The original entity keeps the group marked `is_keeper` in the preview, and its name is not updated to match. Every other group becomes a new entity linked to every feed the original belonged to."],
+      "fields": {
+        "entity_id": "Numeric entity id.",
+        "groups": "The groups returned by the preview, reduced to `group_name` and `source_ids`."
+      },
+      "responses": {
+        "200": {"text": "Split committed.",
+                "shape": "{\n  \"original_entity_id\": <integer>,\n  \"original_entity_sources_kept\": ...,\n  \"new_entities\": [\n    { \"id\": <integer>, \"uuid\": \"<string>\", \"name\": \"<string>\", \"source_count\": <integer> }\n  ],\n  \"discarded_urls\": [...],\n  \"feeds_linked\": [...]\n}"}
+      }
+    },
+    "GET /locations/api/v1/entities/{entity_id}": {
+      "desc": "Get a single entity's raw record.",
+      "fields": {"entity_id": "Numeric entity id."},
+      "responses": {"200": {"text": "The entity's raw record: location, metadata (base64-encoded) and timestamps."}}
+    },
+    "GET /locations/api/v1/source-evaluation-logs/by-url": {
+      "desc": "Full AI evaluation reasoning for a discovered source, keyed by URL.",
+      "responses": {
+        "200": {"text": "The AI evaluation of the source.",
+                "shape": "{\n  \"id\": ...,\n  \"credibility_score\": ...,\n  \"local_focus\": ...,\n  \"quality\": ...,\n  \"evaluation_details\": {\n    \"type\": \"<string>\",\n    \"title\": \"<string>\",\n    \"evaluation_notes\": \"<string>\",\n    ...\n  }\n}"}
+      }
+    },
+    "POST /locations/api/v1/feeds/{feed_id}/sources/upload": {
+      "desc": "Import a list of source URLs (plain text or CSV flows). Async, returns 202.",
+      "notes": ["Send either `urls` (plain text flow) or `urls_with_metadata` (CSV flow), not both. CSV parsing and preview happen on the client; this endpoint always receives the final URL list.",
+                "Returns 202 immediately. Progress polling for this `job_id` is not documented yet."],
+      "fields": {
+        "feed_id": "Numeric feed id (returned by `POST /feeds`).",
+        "urls": "Plain Text sub-flow: array of raw URL strings.",
+        "urls_with_metadata": "CSV Upload sub-flow: array of `{url, name?}` objects, mutually exclusive with `urls`."
+      },
+      "responses": {
+        "202": {"text": "Accepted for background processing.",
+                "shape": "{\n  \"job_id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"url_count\": <integer>,\n  \"valid_urls\": ...,\n  \"invalid_urls\": ...,\n  \"status\": \"processing\",\n  \"message\": \"<string>\"\n}"}
+      }
+    },
+    "POST /orchestrator/workflows/dataset-upload/trigger": {
+      "desc": "Import a behavioral dataset (multipart: jsonl, csv or xlsx, up to 25 MB).",
+      "notes": ["Send as multipart form data with the form fields below plus the file (jsonl, csv or xlsx, up to 25 MB).",
+                "The name of the multipart part that carries the file is not documented yet."],
+      "fields": {
+        "dataset_title": "Required.",
+        "dataset_behavior": "Optional free-text tag, e.g. `consumer-spending`.",
+        "dataset_unit": "Optional, e.g. `Percent of 2019`.",
+        "dataset_description": "Optional free text for analysts and Ubi.",
+        "dataset_external_id": "Optional. Defaults to a value generated from the filename."
+      },
+      "example": "dataset_title=<string>\ndataset_behavior=consumer-spending\ndataset_unit=Percent of 2019\ndataset_source_url=https://example.com\ndataset_description=<string>\ndataset_external_id=<string>\n<file part> (jsonl, csv or xlsx, max 25 MB; part name not documented yet)",
+      "responses": {
+        "200": {"text": "Upload job created.",
+                "shape": "{\n  \"job_id\": \"<string>\",\n  \"status\": \"pending\",\n  \"progress\": 0.0,\n  \"dataset_id\": null,\n  \"series_names\": [],\n  \"observations_stored\": 0,\n  \"skipped_rows\": 0,\n  \"warnings\": [],\n  \"error\": null,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\",\n  \"completed_at\": null\n}"}
+      }
+    },
+    "GET /orchestrator/workflows/dataset-upload/{job_id}/status": {
+      "desc": "Poll a dataset upload job: pending, running, completed.",
+      "notes": ["Typical lifecycle: pending (progress 0.0), running (0.5), completed (1.0), reached within about 3 seconds for a trivial file."],
+      "fields": {"job_id": "Job id."},
+      "responses": {
+        "200": {"text": "Same shape as the trigger response. On completion `dataset_id` is populated, `series_names` lists the file's non-date column headers, and `observations_stored`, `skipped_rows` and `warnings` are filled in.",
+                "shape": "{\n  \"job_id\": \"<string>\",\n  \"status\": \"pending\",\n  \"progress\": 0.0,\n  \"dataset_id\": null,\n  \"series_names\": [],\n  \"observations_stored\": 0,\n  \"skipped_rows\": 0,\n  \"warnings\": [],\n  \"error\": null,\n  \"created_at\": \"<timestamp>\",\n  \"updated_at\": \"<timestamp>\",\n  \"completed_at\": null\n}"}
+      }
+    },
+    "POST /orchestrator/api/v1/jobs/create": {
+      "desc": "Launch a discovery job. The only call that actually starts agentic work; optional relative to pipeline creation.",
+      "notes": ["Wait for a running job to finish before launching another for the same feed.",
+                "The request sends `job_type: \"discovery\"`; reading the job back reports `job_type: \"curation\"`. Both values are real."],
+      "fields": {
+        "parameters.vote_context.liked_entities": "Array of `{name, type}` objects used to steer discovery toward previously-liked entities."
+      },
+      "responses": {
+        "200": {"text": "Job created and queued.", "shape": "{\n  \"id\": \"<string>\",\n  \"status\": \"pending\",\n  \"progress\": 0\n}"}
+      }
+    },
+    "GET /locations/api/v1/jobs/{job_id}": {
+      "desc": "Poll a job's status and progress.",
+      "fields": {"job_id": "Job id."},
+      "responses": {
+        "200": {"text": "Current job state.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"status\": \"<pending | running | completed | failed | cancelled>\",\n  \"progress\": <0-100>,\n  \"job_type\": \"curation\",\n  \"result_data\": ...,\n  \"pipeline_id\": \"<string>\"\n}"}
+      }
+    },
+    "PUT /locations/api/v1/jobs/{job_id}/status": {
+      "desc": "Cancel a job (only status=cancelled exercised).",
+      "notes": ["Only `status: \"cancelled\"` has been exercised."],
+      "fields": {"job_id": "Job id."},
+      "responses": {"200": {"text": "The job, echoed with `status` set to `cancelled` and `completed_at` set."}}
+    },
+    "GET /locations/api/v1/jobs": {
+      "desc": "List jobs across the account.",
+      "responses": {"200": {"text": "Array of job objects (same shape as `GET /jobs/{job_id}`)."}}
+    },
+    "GET /locations/api/v1/jobs/count": {
+      "desc": "Total job count.",
+      "responses": {"200": {"text": "Total number of jobs.", "shape": "{\n  \"count\": <integer>\n}"}}
+    },
+    "GET /locations/api/v1/jobs/count/status/{status}": {
+      "desc": "Job count by status.",
+      "fields": {"status": "Job status to count. One of: `pending`, `running`, `completed`, `failed`, `cancelled`."},
+      "responses": {"200": {"text": "Number of jobs in that status.", "shape": "{\n  \"count\": <integer>\n}"}}
+    },
+    "GET /orchestrator/jobs/{job_id}/async-status": {
+      "desc": "Async sub-task progress for a job.",
+      "fields": {"job_id": "Job id."},
+      "responses": {
+        "200": {"text": "Progress of the job's asynchronous sub-tasks.",
+                "shape": "{\n  \"job_id\": \"<string>\",\n  \"pending_count\": <integer>,\n  \"processed_count\": <integer>,\n  \"failed_count\": <integer>,\n  \"total_count\": <integer>,\n  \"all_complete\": <boolean>,\n  \"has_async_work\": <boolean>,\n  \"snapshots\": [...]\n}"}
+      }
+    },
+    "GET /understand/chat/sessions": {
+      "desc": "List Ubi chat sessions for a user and feed.",
+      "notes": ["`keycloak_user_id` is the account email here, the opposite of the entity-votes call."],
+      "fields": {"keycloak_user_id": "The account email, not the Keycloak UUID.", "feed_id": "Numeric feed id (returned by `POST /feeds`)."},
+      "responses": {
+        "200": {"text": "`[]`, or an array of session objects. Each session's `filter_state` is derived automatically from its first message.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"title\": \"<string>\",\n  \"filter_state\": {\n    \"topics\": [...], \"entities\": [...], \"dateRange\": {...},\n    \"siteTypes\": [...], \"metricName\": \"<string>\",\n    \"textSearch\": \"<string>\", \"entityTypes\": [...]\n  }\n}"}
+      }
+    },
+    "POST /understand/chat/sessions": {
+      "desc": "Create a chat session (created lazily on first message).",
+      "notes": ["The session is created lazily, on the first message, rather than when a dedicated \"New Chat\" action is clicked."],
+      "responses": {
+        "200": {"text": "Session created.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"title\": \"<string>\",\n  \"filter_state\": {\n    \"topics\": [...], \"entities\": [...], \"dateRange\": {...},\n    \"siteTypes\": [...], \"metricName\": \"<string>\",\n    \"textSearch\": \"<string>\", \"entityTypes\": [...]\n  }\n}"}
+      }
+    },
+    "GET /understand/chat/sessions/{session_id}": {
+      "desc": "Get one session's metadata.",
+      "fields": {"session_id": "Chat session id."},
+      "responses": {
+        "200": {"text": "The session.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"feed_id\": <integer>,\n  \"title\": \"<string>\",\n  \"filter_state\": {\n    \"topics\": [...], \"entities\": [...], \"dateRange\": {...},\n    \"siteTypes\": [...], \"metricName\": \"<string>\",\n    \"textSearch\": \"<string>\", \"entityTypes\": [...]\n  }\n}"}
+      }
+    },
+    "DELETE /understand/chat/sessions/{session_id}": {
+      "desc": "Delete a chat session.",
+      "fields": {"session_id": "Chat session id."},
+      "responses": {"200": {"text": "Session deleted.", "shape": "{\n  \"status\": \"deleted\",\n  \"session_id\": \"<string>\"\n}"}}
+    },
+    "GET /understand/chat/sessions/{session_id}/messages": {
+      "desc": "Read a session's message history.",
+      "fields": {"session_id": "Chat session id."},
+      "responses": {
+        "200": {"text": "Array of messages, oldest to newest as stored.",
+                "shape": "{\n  \"id\": \"<string>\",\n  \"session_id\": \"<string>\",\n  \"role\": \"<user | assistant>\",\n  \"content\": \"<string>\",\n  \"citations\": [ { \"id\": ..., \"url\": \"<string>\", \"score\": ..., \"title\": \"<string>\" } ],\n  \"chart\": { \"type\": \"<string>\", \"title\": \"<string>\", \"config\": {...} },\n  \"created_at\": \"<timestamp>\"\n}"}
+      }
+    },
+    "POST /understand/chat/sessions/{session_id}/messages": {
+      "desc": "Send a message to Ubi. Synchronous: the reply is in the same response. Required field: message.",
+      "notes": ["Synchronous: the reply comes back in this response and no polling is needed. A fresh session is created implicitly on the first call.",
+                "A trivial question takes about 3 to 4 seconds. Complex, feed-wide questions can take several minutes, so set a long client timeout.",
+                "This is a different chat system from the refine loop on `POST /search/unified`: this one is the standing per-feed Understand chat."],
+      "fields": {
+        "session_id": "Chat session id.",
+        "message": "Required. The field is `message`, not `content`; an empty body returns 422."
+      },
+      "responses": {
+        "200": {"text": "Ubi's reply, returned inline.",
+                "shape": "{\n  \"user_message\": {\n    \"id\": \"<string>\", \"session_id\": \"<string>\", \"role\": \"user\",\n    \"content\": \"<string>\", \"created_at\": \"<timestamp>\"\n  },\n  \"assistant_message\": {\n    \"id\": \"<string>\", \"role\": \"assistant\", \"content\": \"<string>\",\n    \"reasoning_summary\": \"<string>\", \"citations\": [...], \"chart\": {...},\n    \"created_at\": \"<timestamp>\"\n  },\n  \"citations\": [...],\n  \"artifacts_count\": <integer>,\n  \"chart\": {...},\n  \"filter_update\": {\n    \"dateRange\": {...}, \"siteTypes\": [...], \"topics\": [...],\n    \"entities\": [...], \"textSearch\": \"<string>\", \"reason\": \"<string>\"\n  }\n}"}
+      }
+    },
+    "GET /understand/artifacts/count/{feed_id}": {
+      "desc": "Count ingested artifacts for a feed. Preferred fast ingestion-progress check.",
+      "notes": ["A fast, inexpensive way to track ingestion progress; cheaper than reading `total_count` from `POST /artifacts/preview`."],
+      "fields": {"feed_id": "Numeric feed id (returned by `POST /feeds`)."},
+      "responses": {
+        "200": {"text": "Number of artifacts ingested for the feed.", "shape": "{\n  \"count\": <integer>,\n  \"feed_id\": <integer>\n}"}
+      }
+    },
+    "POST /understand/artifacts/preview": {
+      "desc": "Fetch artifacts for the Data Browser. Capped at 1000 items regardless of limit.",
+      "notes": ["`limit` is accepted but ignored: at most 1000 items are ever returned."],
+      "fields": {
+        "filter_state.topics": "May be null.",
+        "filter_state.entities": "May be null.",
+        "filter_state.metricName": "May be null.",
+        "filter_state.textSearch": "May be null.",
+        "filter_state.entityTypes": "May be null.",
+        "limit": "Accepted but ignored; at most 1000 items are returned."
+      },
+      "responses": {
+        "200": {"text": "Up to 1000 matching artifacts.",
+                "shape": "{\n  \"artifacts\": [\n    {\n      \"id\": \"<string>\",\n      \"headline\": \"<string>\",\n      \"url\": \"<string>\",\n      \"site_type\": \"<string>\",\n      \"published_at\": \"<timestamp>\",\n      \"content_sample\": \"<string>\",\n      \"score\": ...\n    }\n  ],\n  \"total_count\": <integer>\n}"},
+        "500": {"text": "Returned as \"Collection <email> doesn't exist\" before any artifacts have been ingested for the account. This is expected at that stage and is not a real failure."}
+      }
+    },
+    "POST /understand/metrics/preview": {
+      "desc": "Custom metric time series and per-artifact scores. Slow and uncapped; always scope by date range.",
+      "notes": ["No result cap, so it is slow (roughly 45 to 150+ seconds). Always scope the request with `filter_state.dateRange` and use a long timeout."],
+      "responses": {
+        "200": {"text": "Time series plus per-artifact scores.",
+                "shape": "{\n  \"data\": [ { \"artifact_uuid\": \"<string>\", \"score\": ..., \"list\": ... } ],\n  \"series\": [ { \"bucket\": \"<string>\", \"score\": ... } ],\n  \"total_count\": <integer>,\n  \"filter_applied\": {...}\n}"}
+      }
+    }
+  }
 }
