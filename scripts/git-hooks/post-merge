@@ -1,3 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-exec "$(git rev-parse --show-toplevel)/scripts/git-hooks/rebuild_openapi_pdfs.sh" "ORIG_HEAD"

@@ -31,6 +31,53 @@ email, token, or internal hostname to end up pasted into a SKILL.md
 "confirmed via wire capture" note during development. Treat every commit
 as a potential leak vector.
 
+## If this session's change touches `skills/ubiquity-onboarding/references/openapi.json`
+The repo also ships branded PDF docs generated from that spec
+(`skills/ubiquity-onboarding/dist/Overview.pdf` / `Detailed.pdf`, built by
+the `openapi-branded-pdf` skill from `openapi.json` +
+`skills/ubiquity-onboarding/references/pdf-content.json` +
+`pdf-logo.png`). **There is deliberately no git hook or other automation
+that rebuilds these PDFs for you.** An earlier version of this workflow
+tried a post-commit/post-merge git hook that ran the builder
+mechanically whenever `openapi.json` changed -- it was removed because
+the hard part isn't running the builder script (that part IS
+mechanical), it's that `pdf-content.json` needs genuine LLM judgment:
+reading each new/changed endpoint's spec entry (which is full of
+internal recon notes like `CONFIRMED via XHR capture`, `see ubiquity-*`,
+`UNCONFIRMED`) and distilling it into clean, accurate, customer-facing
+prose for `desc`/`notes`/`fields`/`responses` -- exactly the kind of
+authoring judgment a deterministic git hook cannot do. A hook that ran
+the builder anyway would either (a) silently ship a PDF full of "Not
+documented yet." fallbacks for every new endpoint, or (b) ship whatever
+stale prose was last written for a now-changed endpoint. Neither is
+acceptable for a customer-facing doc.
+
+So: whenever a commit in this session changes `openapi.json`, before
+moving to Step 2's branch/commit flow, stop and do this instead:
+1. Diff the spec change (`git diff` on `openapi.json`) to see exactly
+   which operations are new, removed, or had their summary/parameters/
+   schema change.
+2. For each affected operation, read `skills/openapi-branded-pdf/SKILL.md`'s
+   "Wording rules" and content.json schema, then draft or update that
+   operation's entry in `pdf-content.json` yourself -- same quality bar
+   as the rest of the file (one or two plain sentences, no internal
+   wording, mark anything genuinely undocumented as "not documented
+   yet" rather than guessing). If a whole new functional area was added,
+   also add/adjust a `groups` entry so it doesn't fall into a generic
+   "Other" bucket.
+3. Rebuild both PDFs per the `openapi-branded-pdf` skill's own workflow
+   (Step 4 there) and run its QA pass (Step 5: warnings list, leak/
+   orphan grep, visual spot-check) before considering the content.json
+   update done.
+4. Only then fold the `openapi.json` change, the `pdf-content.json`
+   update, and the regenerated PDFs into the same commit/PR via Step 2
+   below -- they're one logical change, not three.
+If the `openapi.json` change in this session is trivial (e.g. a wording
+fix to an existing operation's summary with no new fields), use
+judgment: a one-line content.json tweak may be all that's needed, but
+still make it explicitly rather than skipping the PDFs silently out of
+date.
+
 ## Step -1: resolve where the repo clone actually lives
 Before anything else (including Step 0), find `<REPO>` -- the local
 path to the ubiquity-skills clone -- with:
