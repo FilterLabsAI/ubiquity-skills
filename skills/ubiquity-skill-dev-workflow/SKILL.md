@@ -164,6 +164,17 @@ remaining finding has been explicitly accepted by the user). Do NOT
 proceed to Step 2 with unresolved findings the user hasn't explicitly
 accepted.
 
+**Pre-existing findings vs. new findings.** The scanner has no concept
+of git diff -- it flags every match in the file, including ones already
+committed on `main` long before this session. Before asking the user to
+decide anything, cross-check each finding's line against `git diff` (or
+`git blame`) for the file: if the matched line is unchanged by this
+session's edit, it's pre-existing and out of scope -- note it to the
+user as "pre-existing, unrelated to this change" and offer to leave it
+alone by default, rather than bundling it into the same accept/redact
+decision as genuinely new findings. Only findings inside lines this
+session actually added or changed block Step 2.
+
 ## Step 1.5: review for overconfident/underspecified claims (logical soundness pass)
 Leak-scanning (Step 1) only catches sensitive DATA, not shaky REASONING --
 run a separate pass over the diff for claims that are stated more
@@ -293,9 +304,25 @@ into this repo clone (copy the changed `SKILL.md`/supporting files over).
      --title "<short title>" --body "<summary>"
    ```
    Report back the PR URL `gh pr create` prints.
+7. **Ask the user whether to merge the PR, as its own separate
+   question, every single time -- never infer it from anything said
+   earlier in the conversation.** An earlier instruction to "integrate
+   this," "add it to the ubiquity skills," or similar does NOT imply
+   merge authorization, even if the user approved everything through
+   step 6 for this same change. Only merge after an explicit yes to a
+   question asked after the PR exists (e.g. "PR #N is open -- merge it
+   into main?"). A prior turn where the user said "ok please merge" for
+   a DIFFERENT PR does not carry forward to this one. If yes:
+   ```
+   gh pr merge <N> --merge --delete-branch
+   ```
 
-Never skip the user-approval gates in steps 3, 5, and 6 -- each is a
+Never skip the user-approval gates in steps 3, 5, 6, and 7 -- each is a
 separate yes/no decision point, not a single blanket "ok go ahead".
+Merging is the highest-stakes of the four (it lands on `main`
+immediately, no further review gate) and must never be bundled into
+an earlier approval or done automatically as a natural-feeling next
+step after opening the PR.
 
 **Keep commit messages and PR descriptions terse and mechanism-focused
 -- do not narrate what was cleaned up or why.** If this work follows a
@@ -307,6 +334,20 @@ matter (even in generic terms like "a specific confidential
 investigation") and draws a reader's attention to go look for it in
 closed PRs/reflog. State only what the current skill content IS (the
 mechanism/bug/API being documented), never what it ISN'T or used to be.
+
+## Writing style for skill content itself (not just commit messages)
+When updating a SKILL.md to reflect a re-tested/fixed behavior, rewrite
+the stale note concisely in place rather than appending a second
+"UPDATE: actually..." paragraph on top of the old one -- state the
+current confirmed fact once, briefly, and delete or trim the superseded
+narration rather than keeping both versions for history. If the same
+endpoint/behavior is documented in more than one place in the skill
+(e.g. a passing mention earlier, a full CONFIRMED note later), write the
+full detail ONCE in the most relevant spot and have every other mention
+just point to it ("see the CONFIRMED note below/above") instead of
+repeating the same test description multiple times -- a reader (and a
+future editor) should find one canonical statement per fact, not three
+slightly-different retellings.
 
 ## Notes
 - `gh` (GitHub CLI) must be authenticated (`gh auth status`); if not, run
