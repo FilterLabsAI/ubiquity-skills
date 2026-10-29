@@ -650,12 +650,32 @@ Content-Type: application/json
 `201`, returns the pipeline object (`id`, `feed_id`, `saved_search_id`,
 `session_id`, empty `metadata: {}` at this point).
 
-**3d. PATCH discovery_config onto the new pipeline** (sets the default
-query/source budget observed in the UI's "Agent Settings" defaults):
+**3d. PATCH discovery_config (and agent_config) onto the new pipeline**
+(sets the default query/source budget observed in the UI's "Agent
+Settings" defaults). **This PATCH does not happen automatically --
+neither pipeline creation (3a-3c) nor job launch (3e) ever write to
+`pipeline.metadata` on their own; it stays `{}` until this step runs.**
+
+**Before running this step for any pipeline, work out agent settings
+that match the user's actual stated intent, not the defaults as a
+rubber stamp.** Read back the user's original request (topic, location,
+what they said they want to learn) and translate it into concrete
+`agent_config.search_generation` / `agent_config.evaluation` choices --
+e.g. a hyperlocal trend-watching request implies heavier `social`/`blog`
+focus_types and higher `local_focus_priority` than a policy/regulatory
+request, which implies heavier `news`/`government` focus and a higher
+`credibility_threshold`. If the request doesn't give you enough to
+decide a field confidently (e.g. desired `max_queries` scale, whether to
+enable dataset hunting), ask the user rather than guessing. Present the
+proposed settings and get the user's go-ahead before PATCHing -- this is
+a real write, same bar as confirming before a job launch -- unless the
+user has already told you to just proceed.
+
 ```
 PATCH /api/locations/v1/pipelines/<pipeline_id>
 Content-Type: application/json
-{"metadata": {"discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25}}}
+{"metadata": {"discovery_config": {"max_queries": 15, "max_sources": 100, "min_sources": 25},
+              "agent_config": { ... tailored search_generation/evaluation, see "Agent Settings" section below ... }}}
 ```
 `200`, returns the updated pipeline with `metadata.discovery_config` set.
 This partial body is only safe here because a pipeline fresh from 3c has
@@ -763,7 +783,11 @@ metric prompts, refresh interval, Ubi chat) -- `pipeline_id` (`id` above) is
 used for permissions, agent settings, and routing. Keep both.
 
 List pipelines: `GET /api/locations/v1/pipelines?limit=10&offset=0&order_by=created_at&order=DESC`
-(also filterable by `?saved_search_id=<uuid>&limit=300`).
+(also filterable by `?saved_search_id=<uuid>&limit=300`). **Response is an
+envelope, not a flat array**: `{"pipelines": [...], "total": N}` --
+unwrap `resp["pipelines"]`, not the bare response. (Note: there is no
+`/api/locations/pipelines` endpoint -- that 404s; the real path has the
+`v1` segment, as shown here.)
 
 **Saved-search rename: fixed as of 2026-10-21 testing.** A `PUT
 /api/locations/api/v1/saved-searches/{id}` with a new `name` (and
